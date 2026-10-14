@@ -1,0 +1,23 @@
+# 비밀 정보
+.env
+*.token
+token*.json
+
+# 파이썬
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 노트북
+.ipynb_checkpoints/
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 대용량 임시 파일
+*.zip
+*.parquet.tmp

@@ -1,0 +1,36 @@
+# 매 거래일 자동 실행 (SP2에서 완성)
+# 지금은 수동 실행(workflow_dispatch)만 켜져 있음.
+# 준비가 끝나면 아래 schedule 주석을 풀어 자동 실행을 켠다.
+name: daily-run
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 0 * * 1-5"   # 월~금 UTC 00:00 = 한국 09:00 (5~15분 지연 가능)
+
+permissions:
+  contents: write   # 예측·거래 기록을 저장소에 커밋하기 위해 필요
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: 수집 → 예측 → 주문
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python -m trade.run_daily
+      - name: 결과 커밋
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/predictions data/trades
+          git commit -m "daily run $(date +%F)" || echo "변경 없음"
+          git push

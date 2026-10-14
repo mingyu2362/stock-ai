@@ -1,0 +1,14 @@
+pandas
+numpy
+requests
+python-dotenv
+finance-datareader
+pykrx
+ta
+xgboost
+scikit-learn
+shap
+transformers
+torch
+streamlit
+plotly
