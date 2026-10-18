@@ -3,19 +3,24 @@
 뉴스 감성 분석에 쓸 수 있는 종목을 고르는 스크립트
 
 흐름
-1. pykrx로 구성 종목 목록을 받는다 (실패하면 universe.csv를 직접 준비)
+1. 구성 종목 목록을 받는다
+   - 환경변수 KRX_ID/KRX_PW가 있으면 pykrx로 실제 지수 구성 종목
+   - 없으면 FinanceDataReader 시가총액 상위(코스피 200 + 코스닥 150)로 근사
+     (최근 pykrx는 KRX 로그인이 있어야 지수 구성 종목 조회가 됨)
 2. 종목마다 샘플 날짜 몇 개만 구글 뉴스 RSS로 검색해 기사 수를 센다
 3. 하루 평균 기사 수로 정렬해 저장한다
 
-설치: pip install pykrx requests pandas
-실행: python screen_news_volume.py
-결과: news_volume_ranking.csv
+설치: pip install requests pandas finance-datareader pykrx
+실행: python collect/screen_news_volume.py   (프로젝트 루트에서)
+결과: data/screening/news_volume_ranking.csv
 
 중간에 끊겨도 다시 실행하면 이미 측정한 종목은 건너뛴다.
 """
 
 import os
 import random
+import re
+import sys
 import time
 import xml.etree.ElementTree as ET
 from datetime import date, timedelta
@@ -24,22 +29,24 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 
-BASE_DATE = "20260921"          # 대회 종목 기준일
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config  # noqa: E402  (종목 별칭 NEWS_ALIASES)
+
+BASE_DATE = "20260921"          # 구성 종목 기준일 (pykrx 사용 시)
 SAMPLE_DATES_PER_YEAR = 2       # 연도별 샘플 날짜 수 (2 x 3년 = 종목당 6번 요청)
 YEARS = [2023, 2024, 2025]
 SLEEP_SEC = 2
 MIN_AVG = 10                    # 이 값 이상이면 후보로 표시
-UNIVERSE_FILE = "universe.csv"
-PROGRESS_FILE = "news_volume_progress.csv"
-RESULT_FILE = "news_volume_ranking.csv"
+OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "data", "screening")
+UNIVERSE_FILE = os.path.join(OUT_DIR, "universe.csv")
+PROGRESS_FILE = os.path.join(OUT_DIR, "news_volume_progress.csv")
+RESULT_FILE = os.path.join(OUT_DIR, "news_volume_ranking.csv")
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
-def load_universe():
-    """코스피200(1028) + 코스닥150(2203) 구성 종목을 받는다."""
-    if os.path.exists(UNIVERSE_FILE):
-        return pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
-
+def universe_from_pykrx():
+    """코스피200(1028) + 코스닥150(2203) 실제 구성 종목 (KRX 로그인 필요)."""
     from pykrx import stock
     rows = []
     for index_code, market in [("1028", "KOSPI200"), ("2203", "KOSDAQ150")]:
@@ -48,7 +55,45 @@ def load_universe():
             rows.append({"code": code,
                          "name": stock.get_market_ticker_name(code),
                          "market": market})
-    df = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
+
+
+def universe_from_fdr():
+    """시가총액 상위 코스피 200 + 코스닥 150 (우선주·스팩 제외)로 근사한다."""
+    import FinanceDataReader as fdr
+    frames = []
+    for listing, market, n in [("KOSPI", "KOSPI200", 200), ("KOSDAQ", "KOSDAQ150", 150)]:
+        df = fdr.StockListing(listing)
+        df = df[df["Code"].str.endswith("0") & ~df["Name"].str.contains("스팩")]
+        df = df.sort_values("Marcap", ascending=False).head(n)
+        frames.append(pd.DataFrame({"code": df["Code"], "name": df["Name"],
+                                    "market": market}))
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_universe():
+    """구성 종목 목록을 받아 저장한다. 이미 받아둔 파일이 있으면 재사용."""
+    if os.path.exists(UNIVERSE_FILE):
+        df = pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
+        if len(df):
+            return df
+
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    df = pd.DataFrame()
+    if os.environ.get("KRX_ID") and os.environ.get("KRX_PW"):
+        try:
+            df = universe_from_pykrx()
+        except Exception as e:
+            print(f"pykrx 실패 ({e}) → FinanceDataReader로 대체")
+    if df.empty:
+        df = universe_from_fdr()
+        print("시가총액 상위 종목으로 근사한 목록을 사용합니다.")
+    if df.empty:
+        raise SystemExit("구성 종목을 받지 못했습니다. 네트워크를 확인하세요.")
+
+    os.makedirs(OUT_DIR, exist_ok=True)
     df.to_csv(UNIVERSE_FILE, index=False, encoding="utf-8-sig")
     print(f"구성 종목 {len(df)}개 저장 → {UNIVERSE_FILE}")
     return df
@@ -65,22 +110,37 @@ def sample_dates():
     return sorted(picked)
 
 
+def term_pattern(term):
+    """제목에서 종목명을 찾는 정규식.
+
+    SK·LG처럼 짧은 영문 이름은 "SK하이닉스" 같은 계열사 기사까지 걸리므로
+    바로 뒤에 조사나 기호만 오는 경우만 인정한다.
+    """
+    if term.isascii() and len(term) <= 3:
+        return re.compile(rf"(?<![A-Za-z0-9]){re.escape(term)}"
+                          rf"(?=$|[^0-9A-Za-z가-힣]|[은는이가을를의와과도에로㈜])")
+    return re.compile(re.escape(term))
+
+
 def count_news(name, day):
-    """하루 동안 제목에 종목명이 들어간 기사 수를 센다."""
-    query = f"{name} after:{day} before:{day + timedelta(days=1)}"
+    """하루 동안 제목에 종목명(또는 별칭)이 들어간 기사 수를 센다."""
+    terms = config.news_terms(name)
+    keyword = " OR ".join(f'"{t}"' for t in terms)
+    query = f"{keyword} after:{day} before:{day + timedelta(days=1)}"
     url = ("https://news.google.com/rss/search?q=" + quote(query)
            + "&hl=ko&gl=KR&ceid=KR:ko")
     res = requests.get(url, headers=HEADERS, timeout=15)
     res.raise_for_status()
     root = ET.fromstring(res.content)
 
+    patterns = [term_pattern(t) for t in terms]
     titles = set()
     for item in root.iter("item"):
         title = item.findtext("title", "")
         source = item.findtext("source", "")
         if source and title.endswith(f" - {source}"):
             title = title[: -len(f" - {source}")]
-        if name in title:
+        if any(p.search(title) for p in patterns):
             titles.add("".join(ch for ch in title if ch.isalnum()))
     return len(titles)
 
@@ -122,7 +182,10 @@ def main():
         print(f"[{i}/{len(todo)}] {row.name:<12} 평균 {result['avg']:5.1f}  "
               f"2023 {result['avg_2023']}  오류 {errors}")
 
-    ranking = (pd.read_csv(PROGRESS_FILE, dtype={"code": str})
+    # 거래 가능 종목(universe)에 있는 것만 남긴다. 목록을 교체해도 측정값은 재사용
+    progress = (pd.read_csv(PROGRESS_FILE, dtype={"code": str})
+                .drop(columns=["name", "market"]).drop_duplicates("code", keep="last"))
+    ranking = (universe.merge(progress, on="code")
                .sort_values("avg", ascending=False))
     ranking["candidate"] = (ranking["avg"] >= MIN_AVG) & (ranking["avg_2023"] >= MIN_AVG / 2)
     ranking.to_csv(RESULT_FILE, index=False, encoding="utf-8-sig")
