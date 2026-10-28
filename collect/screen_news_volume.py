@@ -12,6 +12,7 @@
 
 설치: pip install requests pandas finance-datareader pykrx
 실행: python collect/screen_news_volume.py   (프로젝트 루트에서)
+종목 목록: data/universe.csv
 결과: data/screening/news_volume_ranking.csv
 
 중간에 끊겨도 다시 실행하면 이미 측정한 종목은 건너뛴다.
@@ -37,9 +38,9 @@ SAMPLE_DATES_PER_YEAR = 2       # 연도별 샘플 날짜 수 (2 x 3년 = 종목
 YEARS = [2023, 2024, 2025]
 SLEEP_SEC = 2
 MIN_AVG = 10                    # 이 값 이상이면 후보로 표시
-OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "data", "screening")
-UNIVERSE_FILE = os.path.join(OUT_DIR, "universe.csv")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+OUT_DIR = os.path.join(DATA_DIR, "screening")
+UNIVERSE_FILE = os.path.join(DATA_DIR, "universe.csv")   # price.py, disclosure.py와 같은 목록
 PROGRESS_FILE = os.path.join(OUT_DIR, "news_volume_progress.csv")
 RESULT_FILE = os.path.join(OUT_DIR, "news_volume_ranking.csv")
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -93,7 +94,7 @@ def load_universe():
     if df.empty:
         raise SystemExit("구성 종목을 받지 못했습니다. 네트워크를 확인하세요.")
 
-    os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     df.to_csv(UNIVERSE_FILE, index=False, encoding="utf-8-sig")
     print(f"구성 종목 {len(df)}개 저장 → {UNIVERSE_FILE}")
     return df
