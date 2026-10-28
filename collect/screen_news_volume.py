@@ -23,6 +23,9 @@ from urllib.parse import quote
 
 import pandas as pd
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # pykrx가 KRX_ID / KRX_PW 환경 변수로 로그인한다
 
 BASE_DATE = "20260921"          # 대회 종목 기준일
 SAMPLE_DATES_PER_YEAR = 2       # 연도별 샘플 날짜 수 (2 x 3년 = 종목당 6번 요청)
@@ -37,7 +40,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def load_universe():
     """코스피200(1028) + 코스닥150(2203) 구성 종목을 받는다."""
-    if os.path.exists(UNIVERSE_FILE):
+    if os.path.exists(UNIVERSE_FILE) and os.path.getsize(UNIVERSE_FILE) > 10:
         return pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
 
     from pykrx import stock
@@ -48,6 +51,11 @@ def load_universe():
             rows.append({"code": code,
                          "name": stock.get_market_ticker_name(code),
                          "market": market})
+    if not rows:
+        raise SystemExit(
+            "구성 종목을 받지 못했습니다. pykrx는 KRX 로그인이 필요합니다.\n"
+            "KRX_ID / KRX_PW 환경 변수를 설정하거나, "
+            f"{UNIVERSE_FILE}(code,name,market)을 직접 준비하세요.")
     df = pd.DataFrame(rows)
     df.to_csv(UNIVERSE_FILE, index=False, encoding="utf-8-sig")
     print(f"구성 종목 {len(df)}개 저장 → {UNIVERSE_FILE}")
