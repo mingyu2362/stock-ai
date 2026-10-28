@@ -12,8 +12,9 @@ TRAIN = ("2023-01-01", "2024-12-31")
 VALID = ("2025-01-01", "2025-12-31")
 TEST = ("2026-01-01", "2026-10-31")
 
-# 뉴스 시점 규칙: D일 뉴스는 D+NEWS_LAG_DAYS일 예측부터 사용 (누수 검증: 1 vs 2)
-NEWS_LAG_DAYS = 2
+# 뉴스 시점 규칙: D일에 발행된 뉴스는 D+NEWS_LAG_DAYS일 예측부터 사용
+# (기사 날짜를 발행 날짜로 맞춘 뒤 1일로 충분, features/market_fear.py load_news 참고)
+NEWS_LAG_DAYS = 1
 
 # 모델별 사용 피처 그룹 (시장 피처는 모든 모델 공통)
 FEATURE_GROUPS = {

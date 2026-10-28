@@ -24,7 +24,7 @@ OUT_FILE = os.path.join(ROOT, "data", "processed", "market_features.csv")
 
 Z_WINDOW = 60
 # 검증에서 쓸모가 확인된 뉴스 피처 (방향 예측력은 없고 변동성과 관련)
-NEWS_COLS = ["news_fear_3d", "news_fb_3d", "news_dict_3d", "news_count_ratio"]
+NEWS_COLS = ["news_fear_idx_3d", "news_dict_3d", "news_count_ratio"]
 
 
 def zscore(s, window=Z_WINDOW):
