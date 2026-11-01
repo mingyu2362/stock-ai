@@ -37,15 +37,15 @@ def korean_features(m):
     """T일 종가 기준으로 계산 (호출한 쪽에서 하루 민다)."""
     f = pd.DataFrame(index=m.index)
     for idx in ["kospi", "kosdaq"]:
-        ret = m[idx].pct_change()
+        ret = m[idx].pct_change(fill_method=None)
         f[f"{idx}_ret_1d"] = ret
-        f[f"{idx}_ret_5d"] = m[idx].pct_change(5)
-        f[f"{idx}_ret_20d"] = m[idx].pct_change(20)
+        f[f"{idx}_ret_5d"] = m[idx].pct_change(5, fill_method=None)
+        f[f"{idx}_ret_20d"] = m[idx].pct_change(20, fill_method=None)
         f[f"{idx}_vol_20d"] = ret.rolling(20).std()
         f[f"{idx}_ma20_gap"] = m[idx] / m[idx].rolling(20).mean() - 1
 
-    f["usdkrw_chg_1d"] = m["usdkrw"].pct_change()
-    f["usdkrw_chg_5d"] = m["usdkrw"].pct_change(5)
+    f["usdkrw_chg_1d"] = m["usdkrw"].pct_change(fill_method=None)
+    f["usdkrw_chg_5d"] = m["usdkrw"].pct_change(5, fill_method=None)
     f["kr_3y_chg_5d"] = m["kr_3y"].diff(5)            # %p
     f["kr_spread_10y_3y"] = m["kr_10y"] - m["kr_3y"]  # 장단기 금리차
 

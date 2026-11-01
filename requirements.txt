@@ -10,5 +10,3 @@ scikit-learn
 shap
 transformers
 torch
-streamlit
-plotly

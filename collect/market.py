@@ -3,7 +3,7 @@
 - 국내: 코스피·코스닥 지수, 원/달러 환율, 국고채 3년·10년 금리,
         코스피·코스닥 투자자별(외국인·기관·개인) 순매수 금액
 - 미국: S&P500, 나스닥, 필라델피아 반도체, VIX, 미국채 10년 금리
-- 저장: data/raw/market.csv  (한국 거래일 기준 한 줄)
+- 저장: data/raw/market.csv  (한국 거래일 기준 한 줄, 맨 끝은 국내 값이 빈 다음 거래일 행)
 
 시점 규칙
 - 국내 지표는 해당 거래일 값 (장 마감 후 확정)
@@ -11,9 +11,11 @@
   → 미국 장은 한국 시간 새벽에 끝나므로 당일 아침 예측에 사용 가능
 
 필요: .env 의 KRX_ID/KRX_PW (pykrx 투자자별 매매·국고채 금리 조회에 KRX 로그인 필요)
-실행: python collect/market.py   (프로젝트 루트에서)
+실행: python collect/market.py [--end 2026-10-29]   (프로젝트 루트에서, 기본 오늘.
+      장중에 실행하면 오늘의 미완성 값이 들어가므로 장중에는 --end 로 어제를 지정)
 """
 
+import argparse
 import os
 import sys
 from datetime import date
@@ -81,7 +83,9 @@ def treasury_yields(start, end):
 
 def main():
     start = config.DATA_START
-    end = date.today().isoformat()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--end", default=date.today().isoformat())
+    end = parser.parse_args().end
     s, e = start.replace("-", ""), end.replace("-", "")
 
     # 한국 거래일 = 코스피 지수가 있는 날
@@ -90,6 +94,10 @@ def main():
     kr = kr[kr["kospi"].notna()]
     kr = kr.join(treasury_yields(s, e)).join(investor_flows(s, e))
     kr["usdkrw"] = kr["usdkrw"].ffill()  # 환율 휴일 차이 보정
+    # 다음 거래일 행: 국내 값은 비우고 미국 값만 채운다 (그날 아침 예측용, 다음 실행 때 실제 값으로 바뀜)
+    # 공휴일은 고려하지 않음 → 장 시작 전이나 장 마감 후에 실행할 것
+    next_day = kr.index.max() + pd.offsets.BDay(1)
+    kr = kr.reindex(kr.index.append(pd.DatetimeIndex([next_day])))
 
     # 미국 지표: 한국 거래일 이전 마지막 값 (같은 날짜 값은 쓰지 않음)
     us_start = (pd.Timestamp(start) - pd.Timedelta(days=10)).date().isoformat()  # 첫 거래일 이전 값 확보
@@ -105,8 +113,9 @@ def main():
     merged.round(4).to_csv(OUT_FILE, index=False, encoding="utf-8-sig")
 
     print(f"{len(merged)}일 저장 → {OUT_FILE}")
-    print(f"기간: {merged['date'].min().date()} ~ {merged['date'].max().date()}")
-    missing = merged.isna().sum()
+    print(f"기간: {merged['date'].min().date()} ~ {merged['date'].max().date()} "
+          f"(마지막 날은 예측용 빈 행)")
+    missing = merged.iloc[:-1].isna().sum()
     if missing.any():
         print("빈 값:\n" + missing[missing > 0].to_string())
 

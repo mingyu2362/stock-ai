@@ -21,3 +21,6 @@ Thumbs.db
 # 대용량 임시 파일
 *.zip
 *.parquet.tmp
+
+# 매일 다시 만드는 대용량 피처 (66MB, features/chart.py)
+data/processed/chart_features.csv
