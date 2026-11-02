@@ -1,0 +1,12 @@
+[15:50:53] 체결 3건 → C:\Dev\stock-ai\data\trades\trades.csv
+[15:50:53]   buy 한화솔루션 1416주 @ 22,988
+[15:50:53]   buy 브이엠 765주 @ 42,548
+[15:50:53]   buy 에이피알 130주 @ 250,931
+[15:50:53] 총평가 101,909,280원 (시작 1억 대비 +1.91%) → C:\Dev\stock-ai\data\trades\equity.csv
+대시보드 데이터 → C:\Dev\stock-ai\dashboard\public\data
+  universe.json
+  stocks.json
+  today.json
+  market.json
+  performance.json
+  orderlog.json
