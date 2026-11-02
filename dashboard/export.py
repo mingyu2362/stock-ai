@@ -3,6 +3,8 @@
 - today.json        최신 예측 순위(상위 30)와 주문 목록, 전략 설정 (model/predict.py 결과)
 - market.json       코스피·코스닥 지수와 공포지수·뉴스 방향 점수 (2025-01 ~)
 - performance.json  실전 모의투자 성과 (data/trades/equity.csv, trades.csv 가 있으면)
+- orderlog.json     최근 매매일 주문 기록 (주문 시각·체결 확인 시각, data/trades/log_날짜.json)
+- stocks.json       전체 상장 종목 (실시간 순위 검색창용)
 - universe.json     대회 종목 목록 (실시간 순위에서 대회 종목 표시용)
 - backtest.json     (--backtest) 실전 전략과 모델 비교 백테스트. 오래 걸려서 따로 실행
 
@@ -66,6 +68,19 @@ def universe():
     u = pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
     write("universe.json", {r.code: {"name": r.name, "market": r.market} for r in u.itertuples()})
     return u.set_index("code")
+
+
+def stocks():
+    """전체 상장 종목 (검색창용) [[code, name, market], ...]. 받기 실패하면 이전 파일 유지.
+    (장중에는 시가총액 열이 비어 와서 정렬은 검색창에서 한다)"""
+    try:
+        import FinanceDataReader as fdr
+        df = fdr.StockListing("KRX")
+    except Exception as e:  # noqa: BLE001 - 네트워크 문제로 전체 내보내기가 멈추지 않게
+        print(f"  stocks.json 건너뜀 ({e})")
+        return
+    market = df["Market"].replace({"KOSDAQ GLOBAL": "KOSDAQ"})
+    write("stocks.json", [[c, n, m] for c, n, m in zip(df["Code"], df["Name"], market)])
 
 
 def today(u):
@@ -142,6 +157,21 @@ def performance():
     })
 
 
+def orderlog():
+    """가장 최근 매매 프로그램 주문 기록 (trade/run_daily.py 의 log_날짜.json).
+    한투 모의투자는 주문별 체결 내역을 주지 않아 주문 시각·체결 확인 시각은 여기서만 알 수 있다."""
+    logs = sorted(f for f in os.listdir(TRADE_DIR) if f.startswith("log_") and f.endswith(".json")) \
+        if os.path.isdir(TRADE_DIR) else []
+    if not logs:
+        return
+    with open(os.path.join(TRADE_DIR, logs[-1]), encoding="utf-8") as f:
+        d = json.load(f)
+    tag = logs[-1][4:12]
+    write("orderlog.json", {"date": f"{tag[:4]}-{tag[4:6]}-{tag[6:]}",
+                            "orders": [{**o, "side": "sell"} for o in d["sells"]]
+                            + [{**o, "side": "buy"} for o in d["buys"]]})
+
+
 def backtest():
     import backtest as bt
     from joblib import Parallel, delayed
@@ -209,9 +239,11 @@ def backtest():
 def main():
     print(f"대시보드 데이터 → {OUT_DIR}")
     u = universe()
+    stocks()
     today(u)
     market()
     performance()
+    orderlog()
     if "--backtest" in sys.argv:
         backtest()
 

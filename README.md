@@ -39,12 +39,24 @@ npm install
 npm run dev                             # http://localhost:5173
 ```
 
-- 화면: 오늘의 추천·주문 / 실전 성과 / 시장·공포지수 / 실시간 순위(네이버 증권) / 백테스트·연구
+- 화면: 오늘의 추천·주문 / 계좌 현황 / 실전 성과 / 시장·공포지수 / 실시간 순위(네이버 증권) / 백테스트·연구, 종목 이름을 누르면 종목 상세(캔들 차트, `api/stock.js`)
 - 매일 `python model/daily.py` 가 마지막에 `export.py` 를 실행 → `dashboard/public/data` 를 커밋·푸시하면 Vercel 이 자동 배포
 - Vercel 설정: 저장소 연결 후 **Root Directory = `dashboard`** (빌드 명령·출력 폴더는 `vercel.json`)
 - 실시간 순위는 `dashboard/api/naver.js` 서버리스 함수가 네이버 증권에서 받아 전달 (공식 API 아님)
 - 계좌 현황은 사용자가 자기 한투 모의투자 앱 키를 입력해 자기 계좌만 조회 (키는 그 사람 브라우저에만 저장, `dashboard/api/account.js` 는 저장 없이 잔고 조회만 중계, 주문 기능 없음). Vercel 에 KIS 키를 넣을 필요 없음
 - 실전 성과는 `data/trades/equity.csv`(date, equity), `data/trades/trades.csv`(date, code, side, shares, price) 가 있으면 표시
+
+## 실전 매매 (trade/)
+
+| 언제 | 명령 | 하는 일 |
+|---|---|---|
+| 거래일 07:00 ~ 08:20 시작 | `python -m trade.run_daily --live` | 잔고 → 수집·예측(월요일은 재학습) → 08:30 동시호가 매도(시장가) → 09:00 직후 매수(현재가 +1% 지정가, 1분 안에 안 되면 다시) |
+| 15:40 이후 | `python -m trade.run_daily --close` | 오늘 체결 → `data/trades/trades.csv`, 총평가 → `equity.csv`, 대시보드 데이터 갱신 |
+| 시험 | `python -m trade.run_daily --day 20261102` | 그날 주문 목록으로 주문 없이 출력만 (DRY RUN) |
+
+- `--live` 가 없고 `config.DRY_RUN=True` 이면 주문하지 않는다. 같은 날 매수까지 끝낸 기록(`data/trades/log_날짜.json`)이 있으면 다시 주문하지 않는다
+- 시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두어 3종목을 다 살 수 없다 → 매수는 지정가
+- 자동 실행: `.github/workflows/daily.yml` (06:40 아침, 16:00 마감 후). 저장소 Secrets 에 한투 키, Variables 에 `LIVE_TRADING=true` 를 넣어야 실제 주문
 
 ## 키 관리 규칙
 

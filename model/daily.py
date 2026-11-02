@@ -19,10 +19,11 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKET_HOURS = ("08:30", "15:40")
+KST = timezone(timedelta(hours=9))   # GitHub Actions 서버는 UTC 라 한국 시간으로 비교
 
 STEPS = [
     ["collect/price.py"],
@@ -50,7 +51,7 @@ def main():
     parser.add_argument("--holdings")
     args = parser.parse_args()
 
-    now = datetime.now().strftime("%H:%M")
+    now = datetime.now(KST).strftime("%H:%M")
     if not args.force and MARKET_HOURS[0] <= now <= MARKET_HOURS[1]:
         raise SystemExit(f"지금 {now}는 장중입니다. 미완성 시세가 저장되므로 "
                          f"{MARKET_HOURS[1]} 이후나 다음 날 {MARKET_HOURS[0]} 전에 실행하세요.")

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { marketOpen, Pct, StockLink, useJson, won } from "../lib.jsx";
 
 const TYPES = [
@@ -12,11 +12,85 @@ const MARKETS = [
 ];
 const REFRESH_MS = 30_000;
 
+const MARKET_LABEL = { KOSPI200: "코스피200", KOSDAQ150: "코스닥150", KOSPI: "코스피", KOSDAQ: "코스닥", KONEX: "코넥스" };
+const norm = (s) => s.toLowerCase().replace(/\s/g, "");
+
+// 전체 상장 종목(stocks.json)을 이름·코드로 찾는다. 대회 종목이 먼저, 대회 밖 종목은 "대회 매매 불가" 표시.
+// 목록에 없는 6자리 코드도 종목 상세로 보낼 수 있다 (신규 상장 등)
+function StockSearch({ universe, ranks }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const all = useJson("stocks.json").data;
+  const key = norm(q);
+
+  const list = useMemo(() => {
+    const m = new Map((all || []).map(([code, name, market]) => [code, { code, name, market }]));
+    for (const [code, u] of Object.entries(universe)) m.set(code, { code, ...u });
+    return [...m.values()].map((s) => ({ ...s, contest: !!universe[s.code], key: norm(s.name), lc: s.code.toLowerCase() }));
+  }, [all, universe]);
+
+  const results = useMemo(() => {
+    if (!key) return [];
+    const hits = list
+      .map((s) => ({
+        ...s,
+        score: s.lc === key || s.key === key ? 0 : s.key.startsWith(key) || s.lc.startsWith(key) ? 1
+          : s.key.includes(key) ? 2 : -1,
+      }))
+      .filter((r) => r.score >= 0)
+      .sort((a, b) => a.score - b.score || b.contest - a.contest
+        || (ranks[a.code] ?? 999) - (ranks[b.code] ?? 999) || a.name.length - b.name.length);
+    if (/^[0-9a-z]{6}$/.test(key) && !list.some((s) => s.lc === key)) {
+      hits.unshift({ code: key.toUpperCase(), name: `${key.toUpperCase()} 종목 보기`, outside: true });
+    }
+    return hits.slice(0, 10);
+  }, [key, list, ranks]);
+
+  const go = (r) => {
+    if (!r) return;
+    window.location.hash = `stock/${r.code}`;
+    setQ(""); setOpen(false);
+  };
+  const onKey = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); go(results[active]); }
+    else if (e.key === "Escape") setOpen(false);
+  };
+
+  return (
+    <div className="search" onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setOpen(false)}>
+      <input type="search" placeholder="종목 이름 또는 코드 검색" value={q} aria-label="종목 검색"
+        role="combobox" aria-expanded={open && results.length > 0} aria-controls="stock-search-list"
+        onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(0); }}
+        onFocus={() => setOpen(true)} onKeyDown={onKey} />
+      {open && key && (
+        <ul className="search-list" id="stock-search-list" role="listbox">
+          {results.length === 0 && <li className="muted search-none">찾는 종목이 없어요. 6자리 종목코드로 찾아보세요.</li>}
+          {results.map((r, i) => (
+            <li key={r.code} role="option" aria-selected={i === active}>
+              <button type="button" className={i === active ? "on" : ""} onMouseEnter={() => setActive(i)} onClick={() => go(r)}>
+                <span className="search-name">{r.name}</span>
+                {!r.outside && <span className="muted">{r.code} · {MARKET_LABEL[r.market] || r.market}</span>}
+                {r.contest
+                  ? ranks[r.code] && <span className="search-rank">AI {ranks[r.code]}위</span>
+                  : <span className="badge blocked search-rank">대회 매매 불가</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Live() {
   const [type, setType] = useState("searchTop");
   const [market, setMarket] = useState("KOSPI");
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const universe = useJson("universe.json").data || {};
+  const ranks = useJson("today.json").data?.ranks || {};
 
   useEffect(() => {
     let alive = true;
@@ -40,6 +114,7 @@ export default function Live() {
   const time = d?.stocks?.[0]?.time?.slice(11, 16);
   return (
     <>
+      <StockSearch universe={universe} ranks={ranks} />
       <div className="filters">
         <div className="seg" role="group" aria-label="순위 종류">
           {TYPES.map((t) => (

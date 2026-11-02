@@ -21,7 +21,8 @@ export default function Stock({ code }) {
   const [interval, setInterval_] = useState("day");
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const today = useJson("today.json").data;
-  const universe = useJson("universe.json").data || {};
+  const universeData = useJson("universe.json").data;
+  const universe = universeData || {};
 
   useEffect(() => {
     let alive = true;
@@ -64,6 +65,7 @@ export default function Stock({ code }) {
                 {d.name} <span className="muted">{d.code}</span>
                 {d.market && <span className="badge">{d.market}</span>}
                 {universe[d.code] && <span className="badge contest">대회</span>}
+                {universeData && !universe[d.code] && <span className="badge blocked">대회 매매 불가</span>}
               </h2>
               <div className="stock-price">
                 <b className={dirOf(d.change)}>{won(d.price)}</b>
@@ -86,7 +88,7 @@ export default function Stock({ code }) {
                   </div>
                 </>
               ) : (
-                <div className="note">대회 종목이 아니라 AI 순위가 없어요</div>
+                <div className="note">대회 거래 가능 종목(코스피200·코스닥150)이 아니라 대회에서 매매할 수 없고, AI 순위도 없어요</div>
               )}
             </div>
           </div>

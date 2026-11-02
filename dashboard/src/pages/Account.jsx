@@ -100,6 +100,9 @@ function Balance({ creds, onDisconnect }) {
   const [tick, setTick] = useState(0);
   const token = useRef(creds.token);
   const today = useJson("today.json").data;
+  const orderlog = useJson("orderlog.json").data;
+  const planned = useRef([]);   // 오늘 주문 예정 종목 (다 팔아 잔고에서 사라진 종목도 주문 조회하려고)
+  planned.current = (today?.orders || []).map((o) => o.code);
 
   useEffect(() => {
     let alive = true;
@@ -108,7 +111,7 @@ function Balance({ creds, onDisconnect }) {
       const { appKey, appSecret, account } = creds;
       fetch("/api/account", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appKey, appSecret, account, token: token.current }),
+        body: JSON.stringify({ appKey, appSecret, account, token: token.current, codes: planned.current }),
       })
         .then(async (r) => {
           const body = await r.json();
@@ -205,8 +208,150 @@ function Balance({ creds, onDisconnect }) {
               </div>
             )}
           </div>
+
+          {d.orders?.length || !d.ordersByCode?.length
+            ? <Orders orders={d.orders || []} />
+            : <OrdersByCode rows={d.ordersByCode} summary={d.orderSummary} positions={d.positions}
+                today={today} orderlog={orderlog} fetchedAt={d.fetchedAt} />}
         </div>
       )}
     </>
+  );
+}
+
+function orderStatus(o) {
+  if (o.rejected > 0) return { text: "거부", open: false };
+  if (o.remain > 0) return { text: o.filled > 0 ? "부분 체결" : "미체결", open: true };
+  if (o.filled >= o.qty) return { text: "체결", open: false };
+  if (o.canceled > 0) return { text: o.filled > 0 ? "일부 체결 후 취소" : "취소", open: false };
+  return { text: "접수", open: true };
+}
+
+const FILTERS = [["all", "전체"], ["open", "미체결"], ["filled", "체결"]];
+
+const kstToday = (iso) => new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+
+function StatusFilter({ filter, setFilter }) {
+  return (
+    <div className="filters" style={{ marginBottom: 8 }}>
+      <div className="seg" role="group" aria-label="주문 상태">
+        {FILTERS.map(([k, label]) => (
+          <button key={k} aria-pressed={filter === k} onClick={() => setFilter(k)}>{label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 한투 모의투자는 주문별 목록을 주지 않아 종목별 합계로 보여 준다.
+// 주문 시각·체결 확인 시각은 우리 매매 프로그램 기록(orderlog.json)에 같은 날·같은 종목이 있을 때만 붙인다
+function OrdersByCode({ rows, summary, positions, today, orderlog, fetchedAt }) {
+  const [filter, setFilter] = useState("all");
+  const names = Object.fromEntries([...(today?.orders || []), ...positions].map((p) => [p.code, p.name]));
+  const action = Object.fromEntries((today?.orders || []).map((o) => [o.code, o.action]));
+  const logged = orderlog?.date === kstToday(fetchedAt) ? orderlog.orders : [];
+  const list = rows.map((r) => {
+    const mine = logged.filter((o) => o.code === r.code);
+    const checked = mine.map((o) => o.checked_at).filter(Boolean).sort();
+    const status = r.remain > 0 ? { text: r.filled > 0 ? "부분 체결" : "미체결", open: true } : { text: "체결", open: false };
+    return {
+      ...r, status, name: names[r.code] || mine[0]?.name || r.code,
+      side: mine[0]?.side || action[r.code] || "buy",
+      orderedAt: mine.map((o) => o.time).sort()[0],
+      checkedAt: r.remain > 0 ? null : checked[checked.length - 1],
+      tries: mine.length,
+    };
+  });
+  const shown = list.filter((o) => filter === "all" || (filter === "open" ? o.status.open : o.filled > 0));
+
+  return (
+    <div className="card">
+      <h2>오늘 주문 {list.length}종목</h2>
+      <p className="sub">
+        체결 {won(summary.filled)}주 / 주문 {won(summary.qty)}주 · 체결금액 {eok(summary.amount)}원 · 수수료·세금 약 {won(summary.fee)}원.
+        한투 모의투자는 주문별 내역을 주지 않아 종목별 합계로 보여요. 체결 확인은 매매 프로그램이 체결을 확인한 시각이에요 (실제 체결은 그보다 이를 수 있음).
+      </p>
+      <StatusFilter filter={filter} setFilter={setFilter} />
+      {shown.length === 0 ? (
+        <div className="empty">해당하는 주문이 없어요.</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th className="l">종목</th><th className="l">구분</th><th>주문 수량</th><th>체결 수량</th><th>미체결</th>
+                <th>체결 평균가</th><th className="l">상태</th><th className="l">주문 시각</th><th className="l">체결 확인</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((o) => (
+                <tr key={o.code}>
+                  <td className="l"><StockLink code={o.code} name={o.name} /></td>
+                  <td className="l">
+                    <span className={`badge ${o.side}`}>{o.side === "buy" ? "매수" : "매도"}</span>
+                    {o.tries > 1 && <span className="muted"> {o.tries}회 주문</span>}
+                  </td>
+                  <td className="num">{won(o.qty)}</td>
+                  <td className="num">{won(o.filled)}</td>
+                  <td className="num">{o.remain ? won(o.remain) : "–"}</td>
+                  <td className="num">{o.filled ? won(Math.round(o.fillPrice)) : "–"}</td>
+                  <td className="l">{o.status.open ? <b>{o.status.text}</b> : <span className="muted">{o.status.text}</span>}</td>
+                  <td className="l num">{o.orderedAt || "–"}</td>
+                  <td className="l num">{o.checkedAt || "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Orders({ orders }) {
+  const [filter, setFilter] = useState("all");
+  const rows = orders.map((o) => ({ ...o, status: orderStatus(o) }));
+  const openCount = rows.filter((o) => o.status.open).length;
+  const filledCount = rows.filter((o) => o.filled > 0).length;
+  const shown = rows.filter((o) => filter === "all" || (filter === "open" ? o.status.open : o.filled > 0));
+
+  return (
+    <div className="card">
+      <h2>오늘 주문 {orders.length}건</h2>
+      <p className="sub">체결 {filledCount}건 · 미체결 {openCount}건. 취소하고 다시 낸 주문은 각각 따로 보여요.</p>
+      <StatusFilter filter={filter} setFilter={setFilter} />
+      {shown.length === 0 ? (
+        <div className="empty">{orders.length ? "해당하는 주문이 없어요." : "오늘 낸 주문이 없어요."}</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th className="l">시각</th><th className="l">종목</th><th className="l">구분</th><th>주문 가격</th>
+                <th>주문 수량</th><th>체결 수량</th><th>체결 평균가</th><th>미체결</th><th className="l">상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((o) => (
+                <tr key={o.orderNo}>
+                  <td className="l num">{o.time}</td>
+                  <td className="l"><StockLink code={o.code} name={o.name} /></td>
+                  <td className="l">
+                    <span className={`badge ${o.side}`}>{o.side === "buy" ? "매수" : "매도"}</span>
+                    <span className="muted"> {o.type}</span>
+                  </td>
+                  <td className="num">{o.orderPrice ? won(o.orderPrice) : "시장가"}</td>
+                  <td className="num">{won(o.qty)}</td>
+                  <td className="num">{won(o.filled)}</td>
+                  <td className="num">{o.filled ? won(o.fillPrice) : "–"}</td>
+                  <td className="num">{o.remain ? won(o.remain) : "–"}</td>
+                  <td className="l">{o.status.open ? <b>{o.status.text}</b> : <span className="muted">{o.status.text}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

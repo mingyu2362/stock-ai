@@ -1,36 +1,70 @@
-# 매 거래일 자동 실행 (SP2에서 완성)
-# 지금은 수동 실행(workflow_dispatch)만 켜져 있음.
-# 준비가 끝나면 아래 schedule 주석을 풀어 자동 실행을 켠다.
+# 매 거래일 자동 실행 (한투 모의투자)
+# - 아침: 06:40 KST 시작 → 수집·예측 → 08:30 동시호가 매도 → 09:00 직후 매수
+# - 장 마감 후: 16:00 KST → 체결·평가금액 기록, 대시보드 데이터 갱신
+# 결과(주문 목록·거래 기록·대시보드 데이터)는 저장소에 커밋 → Vercel 이 대시보드를 다시 배포
+#
+# 실제 주문 스위치: 저장소 Settings → Secrets and variables → Actions → Variables 에
+#   LIVE_TRADING = true 를 만들어야 실제로 주문한다. 없으면 DRY RUN (주문 목록만 만듦)
+# 수동 실행(Actions 탭 → Run workflow)은 live 를 체크해야 실제 주문.
+# GitHub 예약 실행은 수 분 ~ 수십 분 늦게 시작할 수 있어 08:30 보다 넉넉히 일찍 잡는다.
 name: daily-run
 
 on:
+  schedule:
+    - cron: "40 21 * * 0-4"   # 일~목 UTC 21:40 = 월~금 한국 06:40 (아침)
+    - cron: "0 7 * * 1-5"     # 월~금 UTC 07:00 = 한국 16:00 (장 마감 후)
   workflow_dispatch:
-  # schedule:
-  #   - cron: "0 0 * * 1-5"   # 월~금 UTC 00:00 = 한국 09:00 (5~15분 지연 가능)
+    inputs:
+      step:
+        description: "morning 또는 close"
+        default: "morning"
+      live:
+        description: "실제 주문"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # 예측·거래 기록을 저장소에 커밋하기 위해 필요
 
+concurrency:
+  group: daily-run
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      STEP: ${{ github.event.inputs.step || (github.event.schedule == '0 7 * * 1-5' && 'close' || 'morning') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - name: 수집 → 예측 → 주문
+          cache: pip
+      - name: 패키지 설치 (torch 는 CPU 버전)
+        run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: 실행
         env:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
-        run: python -m trade.run_daily
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
+          PYTHONIOENCODING: utf-8
+          LIVE: ${{ github.event.inputs.live == 'true' || (github.event_name == 'schedule' && vars.LIVE_TRADING == 'true') }}
+        run: |
+          ARGS=""
+          [ "$STEP" = "close" ] && ARGS="--close"
+          [ "$LIVE" = "true" ] && ARGS="$ARGS --live"
+          echo "단계=$STEP 실제주문=$LIVE"
+          python -m trade.run_daily $ARGS
       - name: 결과 커밋
+        if: always()
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/predictions data/trades
-          git commit -m "daily run $(date +%F)" || echo "변경 없음"
-          git push
+          git add data/predictions data/trades data/raw data/processed dashboard/public/data data/models
+          git commit -m "daily run $(TZ=Asia/Seoul date +%F) $STEP" || echo "변경 없음"
+          git pull --rebase -X theirs && git push   # 충돌 시 이번 실행 결과를 우선
