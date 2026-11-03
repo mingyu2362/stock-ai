@@ -1,0 +1,22 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": false,
+ "start_holdings": {
+  "009830": {
+   "name": "한화솔루션",
+   "shares": 1416,
+   "avg_price": 22987.5
+  },
+  "089970": {
+   "name": "브이엠",
+   "shares": 765,
+   "avg_price": 42548.496
+  },
+  "278470": {
+   "name": "에이피알",
+   "shares": 130,
+   "avg_price": 250930.769
+  }
+ }
+}
