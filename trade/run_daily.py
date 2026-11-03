@@ -19,6 +19,10 @@
 - 실제 주문은 GitHub Actions 에서만 (PC 에서는 --allow-local 을 붙여야 함, 같은 날 두 번 주문 방지)
 - 같은 날 매수까지 끝낸 기록(data/trades/log_{날짜}.json)이 있으면 다시 주문하지 않음
 - 종목당 최대 주문 금액 config.MAX_ORDER_KRW
+
+시험 (python -m trade.run_daily --test)   아무 때나
+- 주문 없이(DRY RUN) 시각·오늘 기록과 상관없이 수집·예측부터 다시 돌려 "이렇게 주문하겠다"를 출력
+- 오늘 주문 기록(log_날짜.json)은 건드리지 않는다. 주가·시장 지표는 종가가 확정된 날까지만 받는다
 """
 
 import argparse
@@ -87,11 +91,13 @@ def save_holdings(holdings):
                  columns=["code", "name", "shares"]).to_csv(HOLDINGS_FILE, index=False, encoding="utf-8-sig")
 
 
-def predict(cash, retrain):
+def predict(cash, retrain, force=False):
     args = [sys.executable, os.path.join(ROOT, "model", "daily.py"), "--cash", str(int(cash)),
             "--holdings", HOLDINGS_FILE]
     if retrain:
         args.append("--retrain")
+    if force:   # 장중 실행 허용 (--test)
+        args.append("--force")
     log("예측 실행: model/daily.py" + (" --retrain" if retrain else ""))
     result = subprocess.run(args, cwd=ROOT, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if result.returncode != 0:
@@ -167,7 +173,9 @@ def buy_all(kis, buys, live, daylog):
 
 
 def morning(args):
-    live = args.live or not config.DRY_RUN
+    if args.test and args.live:
+        raise SystemExit("--test 는 주문하지 않는 시험용이라 --live 와 같이 쓸 수 없어요")
+    live = False if args.test else args.live or not config.DRY_RUN
     # 실제 주문은 GitHub Actions 에서만 (내 PC 에서도 돌리면 같은 날 주문이 두 번 나감)
     if live and os.environ.get("GITHUB_ACTIONS") != "true" and not args.allow_local:
         raise SystemExit("실제 주문은 GitHub Actions 에서만 해요. 이 PC 에서 꼭 주문해야 하면 --allow-local 을 붙이세요 "
@@ -182,14 +190,16 @@ def morning(args):
     if today.weekday() >= 5:
         return log("주말 → 종료")
     daylog = DayLog(tag)
+    if args.test:   # 오늘 기록은 무시하고 처음부터 (DRY RUN 이라 이 기록은 저장되지 않음)
+        daylog.data = {"sells": [], "buys": [], "buys_done": False}
     if daylog.data["buys_done"]:
         return log(f"오늘({tag}) 이미 주문을 마쳤어요 → 종료 ({daylog.path})")
-    log(f"{'실전 주문' if live else 'DRY RUN (주문 안 함)'} | {tag}")
+    log(f"{'실전 주문' if live else 'DRY RUN (주문 안 함)'}{' [시험]' if args.test else ''} | {tag}")
 
     kis = Kis()
     bal = kis.balance()
     save_holdings(bal["holdings"])
-    if "start_holdings" not in daylog.data:   # 장 마감 후 체결 추정용 (다시 실행해도 처음 잔고 유지)
+    if "start_holdings" not in daylog.data and not args.test:   # 장 마감 후 체결 추정용 (다시 실행해도 처음 잔고 유지)
         daylog.data["start_holdings"] = {c: {k: h[k] for k in ("name", "shares", "avg_price")}
                                          for c, h in bal["holdings"].items()}
         daylog.save()
@@ -197,7 +207,14 @@ def morning(args):
         + (", ".join(f"{h['name']} {h['shares']}주" for h in bal["holdings"].values()) or "없음"))
 
     orders_file = os.path.join(PRED_DIR, f"orders_{tag}.csv")
-    if now().strftime("%H:%M") < "08:30" and not args.skip_predict:
+    if args.test and not args.skip_predict:
+        # 재학습은 하지 않는다 (실전 모델을 낮에 바꾸지 않게)
+        predict(bal["cash"], retrain=False, force=True)
+        # 장 마감 후에 돌리면 오늘 종가까지 들어가 예측일이 다음 거래일이 된다 → 방금 만든 목록을 쓴다
+        made = sorted(f for f in os.listdir(PRED_DIR) if f.startswith("orders_"))
+        orders_file = os.path.join(PRED_DIR, made[-1])
+        log(f"시험 주문 목록: {made[-1]}")
+    elif now().strftime("%H:%M") < "08:30" and not args.skip_predict:
         predict(bal["cash"], retrain=today.weekday() == 0)
     if not os.path.exists(orders_file):
         raise SystemExit(f"{orders_file} 이 없어요. 08:30 전에 시작하거나 model/daily.py 를 먼저 실행하세요.")
@@ -318,6 +335,8 @@ def main():
     parser.add_argument("--skip-predict", action="store_true", help="이미 만든 orders_{오늘}.csv 로 주문만")
     parser.add_argument("--day", help="시험용 YYYYMMDD: 그날 주문 목록으로 DRY RUN")
     parser.add_argument("--allow-local", action="store_true", help="GitHub Actions 밖(내 PC)에서도 실제 주문 허용")
+    parser.add_argument("--test", action="store_true",
+                        help="시험: 주문 없이 시각·오늘 기록과 상관없이 예측부터 다시 실행")
     args = parser.parse_args()
     try:
         close(args) if args.close else morning(args)

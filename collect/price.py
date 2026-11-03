@@ -3,6 +3,7 @@
 
 - 처음 실행: 2023-01-01부터 오늘까지 종목별로 전부 받는다.
 - 다시 실행: 이미 받은 날짜 다음날부터 새 데이터만 이어 받는다. (매일 자동 실행용)
+- 한국 시각 15:40 전에 실행하면 어제까지만 받는다 (장중 미완성 시세가 저장되지 않게)
 - 시장 지수(코스피, 코스닥)도 함께 받는다.
 
 저장 위치: data/raw/price/{종목코드}.csv, data/raw/price/_index_{지수}.csv
@@ -15,7 +16,7 @@
 import os
 import sys
 import time
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
 import FinanceDataReader as fdr
 import pandas as pd
@@ -25,6 +26,15 @@ UNIVERSE_FILE = "data/universe.csv"
 OUT_DIR = "data/raw/price"
 SLEEP_SEC = 0.3                          # 요청 간격
 INDEXES = {"KOSPI": "KS11", "KOSDAQ": "KQ11"}
+KST = timezone(timedelta(hours=9))       # GitHub Actions 서버는 UTC
+CLOSE_DONE = "15:40"                     # 이 시각 전에는 오늘 시세가 미완성 → 어제까지만 받는다
+
+
+def last_complete_day():
+    """종가가 확정된 마지막 날. 장중에 받은 행은 이어받기라 나중에 고쳐지지 않으므로 아예 받지 않는다."""
+    now = datetime.now(KST)
+    day = now.date() if now.strftime("%H:%M") >= CLOSE_DONE else now.date() - timedelta(days=1)
+    return day.strftime("%Y-%m-%d")
 
 
 def load_universe():
@@ -45,11 +55,11 @@ def update_one(symbol, path):
         if len(old):
             start = (old["Date"].max() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    today = date.today().strftime("%Y-%m-%d")
-    if start > today:
+    end = last_complete_day()
+    if start > end:
         return 0
 
-    new = fdr.DataReader(symbol, start, today)
+    new = fdr.DataReader(symbol, start, end)
     if new is None or new.empty:
         return 0
 

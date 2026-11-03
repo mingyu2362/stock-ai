@@ -95,10 +95,14 @@ def today(u):
     meta = json.load(open(os.path.join(ROOT, "data", "models", f"model_{config.LIVE_MODEL}.json"),
                           encoding="utf-8"))
 
-    chart = pd.read_csv(os.path.join(PROC_DIR, "chart_features.csv"), dtype={"code": str},
-                        parse_dates=["date"])
-    chart = chart[chart["date"] == day].set_index("code")[
-        ["ret_1d", "ret_5d", "ret_20d", "rsi_14", "vol_ratio_20", "volat_20"]]
+    chart_cols = ["ret_1d", "ret_5d", "ret_20d", "rsi_14", "vol_ratio_20", "volat_20"]
+    chart_file = os.path.join(PROC_DIR, "chart_features.csv")   # 커밋하지 않는 파일 (features/chart.py)
+    if os.path.exists(chart_file):
+        chart = pd.read_csv(chart_file, dtype={"code": str}, parse_dates=["date"])
+        chart = chart[chart["date"] == day].set_index("code")[chart_cols]
+    else:
+        print("  today.json: chart_features.csv 가 없어 차트 지표 칸은 비움 (features/chart.py 먼저 실행)")
+        chart = pd.DataFrame(columns=chart_cols, index=pd.Index([], name="code"))
     top = (rank.head(TOP_ROWS).set_index("code").join(chart).join(u[["market"]])
            .reset_index())
     top = top[["rank", "code", "name", "market", "score", "last_close", "buyable",

@@ -12,7 +12,7 @@
 7. dashboard/export.py     대시보드 JSON → dashboard/public/data/ (커밋·푸시하면 Vercel 이 다시 배포)
 
 실행: python model/daily.py [--retrain] [--force] [--cash 금액] [--holdings 파일]
-      (프로젝트 루트에서. --force: 시각 확인 생략)
+      (프로젝트 루트에서. --force: 시각 확인 생략. 장중에 돌려도 주가·시장 지표는 어제까지만 받음)
 """
 
 import argparse
@@ -56,8 +56,11 @@ def main():
         raise SystemExit(f"지금 {now}는 장중입니다. 미완성 시세가 저장되므로 "
                          f"{MARKET_HOURS[1]} 이후나 다음 날 {MARKET_HOURS[0]} 전에 실행하세요.")
 
+    # 시장 지표도 주가(collect/price.py)처럼 종가가 확정된 날까지만 받는다 (--force 로 장중에 돌려도 안전하게)
+    t = datetime.now(KST)
+    end = t.date() if t.strftime("%H:%M") >= MARKET_HOURS[1] else t.date() - timedelta(days=1)
     for step in STEPS:
-        run(step)
+        run(step + ["--end", end.isoformat()] if step == ["collect/market.py"] else step)
     if args.retrain:
         run(["model/train.py", "--final"])
     predict = ["model/predict.py"]
