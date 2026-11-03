@@ -55,6 +55,7 @@ npm run dev                             # http://localhost:5173
 | 시험 | `python -m trade.run_daily --day 20261102` | 그날 주문 목록으로 주문 없이 출력만 (DRY RUN) |
 
 - `--live` 가 없고 `config.DRY_RUN=True` 이면 주문하지 않는다. 같은 날 매수까지 끝낸 기록(`data/trades/log_날짜.json`)이 있으면 다시 주문하지 않는다
+- 실제 주문은 GitHub Actions 에서만 한다. PC 에서 `--live` 로 돌리면 거부되고, Actions 아침 실행이 실패한 날에만 `--live --allow-local` 로 직접 주문
 - 시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두어 3종목을 다 살 수 없다 → 매수는 지정가
 - 자동 실행: `.github/workflows/daily.yml` (06:40 아침, 16:00 마감 후). 저장소 Secrets 에 한투 키, Variables 에 `LIVE_TRADING=true` 를 넣어야 실제 주문
 

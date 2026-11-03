@@ -16,6 +16,7 @@
 
 안전장치
 - --live 를 주지 않고 config.DRY_RUN=True 이면 주문하지 않고 "이렇게 주문하겠다"만 출력
+- 실제 주문은 GitHub Actions 에서만 (PC 에서는 --allow-local 을 붙여야 함, 같은 날 두 번 주문 방지)
 - 같은 날 매수까지 끝낸 기록(data/trades/log_{날짜}.json)이 있으면 다시 주문하지 않음
 - 종목당 최대 주문 금액 config.MAX_ORDER_KRW
 """
@@ -167,6 +168,10 @@ def buy_all(kis, buys, live, daylog):
 
 def morning(args):
     live = args.live or not config.DRY_RUN
+    # 실제 주문은 GitHub Actions 에서만 (내 PC 에서도 돌리면 같은 날 주문이 두 번 나감)
+    if live and os.environ.get("GITHUB_ACTIONS") != "true" and not args.allow_local:
+        raise SystemExit("실제 주문은 GitHub Actions 에서만 해요. 이 PC 에서 꼭 주문해야 하면 --allow-local 을 붙이세요 "
+                         "(그날 Actions 아침 실행이 실패·취소된 경우에만)")
     today = now()
     if args.day:   # 시험용: 다른 날짜의 주문 목록으로 DRY RUN
         if live:
@@ -312,6 +317,7 @@ def main():
     parser.add_argument("--close", action="store_true", help="장 마감 후 기록")
     parser.add_argument("--skip-predict", action="store_true", help="이미 만든 orders_{오늘}.csv 로 주문만")
     parser.add_argument("--day", help="시험용 YYYYMMDD: 그날 주문 목록으로 DRY RUN")
+    parser.add_argument("--allow-local", action="store_true", help="GitHub Actions 밖(내 PC)에서도 실제 주문 허용")
     args = parser.parse_args()
     try:
         close(args) if args.close else morning(args)
