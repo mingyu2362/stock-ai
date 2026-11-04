@@ -1,5 +1,27 @@
 {
- "sells": [],
+ "sells": [
+  {
+   "code": "009830",
+   "name": "한화솔루션",
+   "shares": 1416,
+   "order_no": "0000020129",
+   "time": "10:22:37"
+  },
+  {
+   "code": "089970",
+   "name": "브이엠",
+   "shares": 765,
+   "order_no": "0000020133",
+   "time": "10:22:39"
+  },
+  {
+   "code": "278470",
+   "name": "에이피알",
+   "shares": 130,
+   "order_no": "0000020139",
+   "time": "10:22:40"
+  }
+ ],
  "buys": [],
  "buys_done": true,
  "start_holdings": {
