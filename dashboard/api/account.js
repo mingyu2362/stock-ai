@@ -16,6 +16,7 @@ function send(res, status, body) {
 }
 
 const num = (s) => Number(s ?? 0);
+const RATE_LIMIT = ["EGW00201", "EGW00215"];   // 초당 거래건수 초과 (모의투자는 주로 EGW00215)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const issuing = new Map();   // 같은 키로 동시에 들어온 요청이 토큰을 두 번 발급받지 않도록 (요청이 끝나면 지움)
 
@@ -53,7 +54,7 @@ function getToken(appKey, appSecret) {
 // 조회 GET 공통. 토큰 만료면 null
 async function kisGet(path, trId, params, what, { appKey, appSecret, token }) {
   let body, r;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     r = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -61,8 +62,8 @@ async function kisGet(path, trId, params, what, { appKey, appSecret, token }) {
       },
     });
     body = await r.json();
-    if (body.msg_cd !== "EGW00201") break;   // 초당 거래건수 초과 → 1초 뒤 다시
-    await sleep(1000);
+    if (!RATE_LIMIT.includes(body.msg_cd)) break;   // 초당 거래건수 초과 → 잠시 뒤 다시
+    await sleep(1000 * (attempt + 1));
   }
   if (body.msg_cd === "EGW00123") return null;   // 토큰 만료 → 새로 발급
   if (body.rt_cd !== "0") throw new Error(`${what} 실패: ${body.msg1 || r.status}`);

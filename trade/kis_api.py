@@ -21,6 +21,8 @@ load_dotenv(os.path.join(ROOT, ".env"))
 BASE = "https://openapivts.koreainvestment.com:29443"
 TOKEN_FILE = os.path.join(ROOT, "token_kis.json")
 CALL_GAP_SEC = 0.6
+RATE_LIMIT = ("EGW00201", "EGW00215")   # 초당 거래건수 초과 (모의투자는 주로 EGW00215)
+RETRIES = 6
 
 
 class KisError(Exception):
@@ -62,7 +64,7 @@ class Kis:
         return self._token["value"]
 
     def _call(self, method, path, tr_id, params=None, body=None):
-        for attempt in range(3):
+        for attempt in range(RETRIES):
             wait = self._last_call + CALL_GAP_SEC - time.time()
             if wait > 0:
                 time.sleep(wait)
@@ -75,8 +77,8 @@ class Kis:
                                  data=json.dumps(body) if body else None, timeout=10)
             self._last_call = time.time()
             data = r.json()
-            if data.get("msg_cd") == "EGW00201":      # 초당 거래건수 초과
-                time.sleep(1)
+            if data.get("msg_cd") in RATE_LIMIT:      # 거부된 요청이라 주문도 다시 보내도 중복되지 않음
+                time.sleep(1 + attempt)
                 continue
             if data.get("msg_cd") == "EGW00123":      # 토큰 만료
                 self._token = None

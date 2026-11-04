@@ -29,7 +29,15 @@ def sell_all(kis, pos, price, why, live):
         return log(f"[DRY] {pos['name']} {pos['shares']}주 시장가 매도 ({why})")
     day = now().strftime("%Y%m%d")
     daylog = DayLog(day)
-    order_no, _ = kis.order("sell", pos["code"], pos["shares"])
+    for attempt in range(5):   # 재시도까지 실패해도 감시를 멈추지 않고 몇 번 더 (손절 주문이 가장 중요)
+        try:
+            order_no, _ = kis.order("sell", pos["code"], pos["shares"])
+            break
+        except KisError as e:
+            log(f"매도 주문 실패 ({attempt + 1}/5): {e}")
+            time.sleep(5)
+    else:
+        raise SystemExit("손절 매도 주문을 끝내 못 냈어요 → 직접 확인 필요")
     daylog.data["sells"].append({"code": pos["code"], "name": pos["name"], "shares": pos["shares"],
                                  "order_no": order_no, "time": f"{now():%H:%M:%S}", "note": f"공격형 {why}"})
     daylog.save()
@@ -37,7 +45,11 @@ def sell_all(kis, pos, price, why, live):
     deadline = time.time() + FILL_WAIT_SEC
     while time.time() < deadline:
         time.sleep(15)
-        left = kis.balance()["holdings"].get(pos["code"], {}).get("shares", 0)
+        try:
+            left = kis.balance()["holdings"].get(pos["code"], {}).get("shares", 0)
+        except KisError as e:
+            log(f"  잔고 조회 실패, 다시: {e}")
+            continue
         if not left:
             break
         log(f"  남은 {left}주 체결 대기")
