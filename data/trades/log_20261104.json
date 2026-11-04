@@ -22,7 +22,49 @@
    "time": "10:22:40"
   }
  ],
- "buys": [],
+ "buys": [
+  {
+   "code": "328130",
+   "name": "루닛",
+   "shares": 2121,
+   "limit": 14970,
+   "order_no": "0000020633",
+   "time": "10:26:36",
+   "filled": 2121,
+   "checked_at": "10:27:37"
+  },
+  {
+   "code": "131970",
+   "name": "두산테스나",
+   "shares": 389,
+   "limit": 81600,
+   "order_no": "0000020763",
+   "time": "10:27:40",
+   "filled": 340,
+   "canceled": 49,
+   "checked_at": "10:28:45"
+  },
+  {
+   "code": "131970",
+   "name": "두산테스나",
+   "shares": 49,
+   "limit": 81100,
+   "order_no": "0000020909",
+   "time": "10:28:50",
+   "filled": 49,
+   "checked_at": "10:29:51"
+  },
+  {
+   "code": "078600",
+   "name": "대주전자재료",
+   "shares": 399,
+   "limit": 79500,
+   "order_no": "0000021020",
+   "time": "10:29:54",
+   "filled": 399,
+   "checked_at": "10:30:55"
+  }
+ ],
  "buys_done": true,
  "start_holdings": {
   "009830": {
