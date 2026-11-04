@@ -1,0 +1,20 @@
+{
+ "position": {
+  "code": "078600",
+  "name": "대주전자재료",
+  "shares": 1086,
+  "entry": 86102.025,
+  "entry_date": "2026-11-04",
+  "peak": 92700.0
+ },
+ "last_exit": null,
+ "rules": {
+  "stop_loss": 0.12,
+  "breakeven_at": 0.1,
+  "trail": 0.08
+ },
+ "stop": 75770,
+ "stop_reason": "손절 (매수가 -12%)",
+ "trail_from": 94712,
+ "updated_at": "2026-11-04T15:53:32+09:00"
+}

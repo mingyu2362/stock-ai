@@ -126,10 +126,15 @@ class Kis:
 
     def price(self, code):
         """현재가 (장 전에는 전일 종가, 동시호가 중에는 예상 체결가가 아닐 수 있음)."""
+        return self.quote(code)["price"]
+
+    def quote(self, code):
+        """현재가와 오늘 고가·저가."""
         params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
         data = self._check(self._call("GET", "/uapi/domestic-stock/v1/quotations/inquire-price",
                                       "FHKST01010100", params=params), f"{code} 현재가 조회")
-        return float(data["output"]["stck_prpr"])
+        o = data["output"]
+        return {"price": float(o["stck_prpr"]), "high": float(o["stck_hgpr"]), "low": float(o["stck_lwpr"])}
 
     def fills(self, day=None):
         """오늘(또는 day=YYYYMMDD) 체결된 주문. [{code, name, side, shares, price, order_no}]"""

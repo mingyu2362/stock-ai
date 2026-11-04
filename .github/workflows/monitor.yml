@@ -1,0 +1,61 @@
+# 공격형 장중 감시 (trade/monitor.py): 09:00 ~ 15:20 1분마다 손절선 확인, 닿으면 전량 시장가 매도
+# 안정형이거나 공격형 보유 종목이 없으면 바로 끝난다.
+#
+# 시작: 외부 예약(cron)이 workflow_dispatch 로 장 시작 무렵 실행한다 (GitHub 예약 실행은 자주 빠짐).
+#   POST https://api.github.com/repos/<저장소>/actions/workflows/monitor.yml/dispatches
+#   {"ref": "main"}   (Actions 쓰기 권한이 있는 토큰 필요)
+# 실행 중에 또 불러도 이어서 기다렸다가 15:20 이후 시작돼 바로 끝나므로 여러 번 불러도 안전하다
+#   → 08:50, 10:00, 12:00 처럼 몇 번 불러 두면 앞 실행이 실패해도 다음 실행이 이어받는다.
+# 실제 주문: 저장소 Variables 의 LIVE_TRADING = true 일 때만 (수동 실행은 live 체크)
+name: monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "실제 주문 (비우면 LIVE_TRADING 변수를 따름)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "50 23 * * 0-4"   # 한국 08:50 (외부 예약이 빠졌을 때 대비, 늦게 돌 수 있음)
+    - cron: "0 2 * * 1-5"     # 한국 11:00 (예비)
+
+permissions:
+  contents: write   # 고점·손절선, 손절 기록을 저장소에 커밋
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 400   # 08:50 ~ 15:20 + 매도 체결 대기
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: 패키지 설치 (감시에 필요한 것만)
+        run: pip install pandas requests python-dotenv
+      - name: 감시
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
+          PYTHONIOENCODING: utf-8
+          LIVE: ${{ github.event.inputs.live == 'true' || vars.LIVE_TRADING == 'true' }}
+        run: |
+          ARGS=""
+          [ "$LIVE" = "true" ] && ARGS="--live"
+          echo "실제주문=$LIVE"
+          python -m trade.monitor $ARGS
+      - name: 결과 커밋
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/strategy data/trades
+          git commit -m "monitor $(TZ=Asia/Seoul date '+%F %H:%M')" || echo "변경 없음"
+          git pull --rebase -X theirs && git push

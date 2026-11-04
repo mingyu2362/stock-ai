@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { eok, marketOpen, Pct, StockLink, Tile, useJson, won } from "../lib.jsx";
+import StrategyCard, { useMode } from "../strategy.jsx";
 
 const REFRESH_MS = 10_000;
 const START_CASH = 100_000_000;   // 대회 시작 자금
@@ -35,8 +36,16 @@ const maskAccount = (a) => {
 
 export default function Account() {
   const [creds, setCreds] = useState(loadCreds);
-  if (!creds) return <ConnectForm onConnect={(c) => { saveCreds(c); setCreds(c); }} />;
-  return <Balance creds={creds} onDisconnect={() => { clearCreds(); setCreds(null); }} />;
+  const mode = useMode();
+  if (!creds) {
+    return (
+      <>
+        <StrategyCard m={mode} />
+        <ConnectForm onConnect={(c) => { saveCreds(c); setCreds(c); }} />
+      </>
+    );
+  }
+  return <Balance creds={creds} mode={mode} onDisconnect={() => { clearCreds(); setCreds(null); }} />;
 }
 
 function ConnectForm({ onConnect }) {
@@ -95,7 +104,7 @@ function ConnectForm({ onConnect }) {
   );
 }
 
-function Balance({ creds, onDisconnect }) {
+function Balance({ creds, mode, onDisconnect }) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const [tick, setTick] = useState(0);
   const token = useRef(creds.token);
@@ -132,7 +141,8 @@ function Balance({ creds, onDisconnect }) {
 
   const d = state.data;
   const rankOf = today?.ranks || {};
-  const sellRank = today?.strategy?.sell_rank;
+  const aggressive = mode.data?.mode === "aggressive";
+  const sellRank = aggressive ? null : today?.strategy?.sell_rank;   // 공격형은 순위로 팔지 않음
   const time = d && new Date(d.fetchedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   return (
@@ -164,11 +174,13 @@ function Balance({ creds, onDisconnect }) {
               note={`주식 비중 ${d.summary.total ? ((d.summary.stockValue / d.summary.total) * 100).toFixed(0) : 0}%`} />
           </div>
 
+          <StrategyCard m={mode} positions={d.positions} />
+
           <div className="card">
             <h2>보유 종목 {d.positions.length}개</h2>
             <p className="sub">
               한국투자증권 모의투자 계좌 실시간 잔고. AI 순위는 {today?.date ?? "–"} 예측 기준이며,
-              {sellRank ? ` ${sellRank}위 밖으로 밀리면 다음 날 시가에 팔아요.` : ""}
+              {aggressive ? " 공격형이라 순위와 상관없이 손절선에서만 팔아요." : sellRank ? ` ${sellRank}위 밖으로 밀리면 다음 날 시가에 팔아요.` : ""}
             </p>
             {d.positions.length === 0 ? (
               <div className="empty">보유 종목이 없어요.</div>

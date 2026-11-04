@@ -102,6 +102,6 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/predictions data/trades data/raw data/processed dashboard/public/data data/models
+          git add data/predictions data/trades data/strategy data/raw data/processed dashboard/public/data data/models
           git commit -m "daily run $(TZ=Asia/Seoul date +%F) $STEP" || echo "변경 없음"
           git pull --rebase -X theirs && git push   # 충돌 시 이번 실행 결과를 우선
