@@ -1,5 +1,6 @@
 # 비밀 정보
 .env
+.env.local
 *.token
 token*.json
 
