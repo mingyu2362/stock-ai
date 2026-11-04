@@ -1,0 +1,12 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": true,
+ "start_holdings": {
+  "078600": {
+   "name": "대주전자재료",
+   "shares": 1086,
+   "avg_price": 86102.025
+  }
+ }
+}
