@@ -1,7 +1,7 @@
 {
  "sells": [],
  "buys": [],
- "buys_done": false,
+ "buys_done": true,
  "start_holdings": {
   "009830": {
    "name": "한화솔루션",
@@ -18,5 +18,6 @@
    "shares": 130,
    "avg_price": 250930.769
   }
- }
+ },
+ "note": "11/4 예약 실행이 돌지 않아 10시 이후 PC 에서 매도만 함. 매수는 사용자 요청으로 하지 않음"
 }
