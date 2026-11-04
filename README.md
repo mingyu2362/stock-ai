@@ -50,14 +50,17 @@ npm run dev                             # http://localhost:5173
 
 | 언제 | 명령 | 하는 일 |
 |---|---|---|
-| 거래일 07:00 ~ 08:20 시작 | `python -m trade.run_daily --live` | 잔고 → 수집·예측(월요일은 재학습) → 08:30 동시호가 매도(시장가) → 09:00 직후 매수(현재가 +1% 지정가, 1분 안에 안 되면 다시) |
+| 거래일 06:40 ~ 08:00 시작 | `python -m trade.run_daily --live` | 잔고 → 수집·예측(월요일은 재학습) → 08:30 동시호가 매도(시장가) → 09:00 직후 매수(현재가 +1% 지정가, 1분 안에 안 되면 다시). 08:30 뒤에 시작하면 그 시각 가격으로 바로 매매 |
 | 15:40 이후 | `python -m trade.run_daily --close` | 오늘 체결 → `data/trades/trades.csv`, 총평가 → `equity.csv`, 대시보드 데이터 갱신 |
+| 시험 | `python -m trade.run_daily --test` | 아무 때나 주문 없이 수집·예측부터 다시 돌려 주문 목록 출력 (오늘 기록은 안 건드림) |
 | 시험 | `python -m trade.run_daily --day 20261102` | 그날 주문 목록으로 주문 없이 출력만 (DRY RUN) |
 
 - `--live` 가 없고 `config.DRY_RUN=True` 이면 주문하지 않는다. 같은 날 매수까지 끝낸 기록(`data/trades/log_날짜.json`)이 있으면 다시 주문하지 않는다
 - 실제 주문은 GitHub Actions 에서만 한다. PC 에서 `--live` 로 돌리면 거부되고, Actions 아침 실행이 실패한 날에만 `--live --allow-local` 로 직접 주문
 - 시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두어 3종목을 다 살 수 없다 → 매수는 지정가
-- 자동 실행: `.github/workflows/daily.yml` (06:40 아침, 16:00 마감 후). 저장소 Secrets 에 한투 키, Variables 에 `LIVE_TRADING=true` 를 넣어야 실제 주문
+- 자동 실행: `.github/workflows/daily.yml` (아침 06:40·07:10·07:40, 마감 후 16:00·16:30). 저장소 Secrets 에 한투 키, Variables 에 `LIVE_TRADING=true` 를 넣어야 실제 주문
+  - GitHub 예약 실행은 몇 시간 늦거나 빠질 수 있다. 시작 시각이 한국 06:00~12:00 이면 아침, 15:40 뒤면 마감 후, 그 밖이면 건너뜀
+  - 아침에 안 돌았으면 Actions 탭 → Run workflow (step `morning`, live 체크)로 직접 실행. 시험은 step `test`
 
 ## 키 관리 규칙
 

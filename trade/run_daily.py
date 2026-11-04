@@ -1,10 +1,11 @@
 """매 거래일 실행 흐름 (한투 모의투자)
 
-아침 (python -m trade.run_daily [--live])   07:00 ~ 08:20 사이에 시작
+아침 (python -m trade.run_daily [--live])   06:40 ~ 08:00 사이에 시작
 1. 주말이면 종료, 같은 날 이미 주문했으면 종료 (중복 주문 방지)
 2. 잔고 조회 → data/trades/holdings.csv
 3. model/daily.py --cash --holdings  (수집 → 피처 → 예측 → orders_{오늘}.csv, 월요일은 재학습)
-   08:30 이후에 시작했으면 이 단계는 건너뛰고 이미 만든 orders_{오늘}.csv 를 쓴다
+   08:30 이후에 시작했으면 이미 만든 orders_{오늘}.csv 를 쓰고, 없으면 그때 예측한다 (재학습 없이)
+   → 늦게 시작하면 매도·매수가 시가가 아니라 그 시각 가격으로 나간다
 4. 08:30 ~ 09:00 동시호가: 매도 주문 (시장가)
 5. 09:00 직후: 매수 주문 (현재가 +1% 지정가 → 즉시 체결, 1분 안에 안 되면 취소 후 새 가격으로 최대 3번)
    시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두어 여러 종목을 다 살 수 없어서 지정가를 쓴다
@@ -91,13 +92,11 @@ def save_holdings(holdings):
                  columns=["code", "name", "shares"]).to_csv(HOLDINGS_FILE, index=False, encoding="utf-8-sig")
 
 
-def predict(cash, retrain, force=False):
+def predict(cash, retrain):
     args = [sys.executable, os.path.join(ROOT, "model", "daily.py"), "--cash", str(int(cash)),
             "--holdings", HOLDINGS_FILE]
     if retrain:
         args.append("--retrain")
-    if force:   # 장중 실행 허용 (--test)
-        args.append("--force")
     log("예측 실행: model/daily.py" + (" --retrain" if retrain else ""))
     result = subprocess.run(args, cwd=ROOT, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if result.returncode != 0:
@@ -209,15 +208,18 @@ def morning(args):
     orders_file = os.path.join(PRED_DIR, f"orders_{tag}.csv")
     if args.test and not args.skip_predict:
         # 재학습은 하지 않는다 (실전 모델을 낮에 바꾸지 않게)
-        predict(bal["cash"], retrain=False, force=True)
+        predict(bal["cash"], retrain=False)
         # 장 마감 후에 돌리면 오늘 종가까지 들어가 예측일이 다음 거래일이 된다 → 방금 만든 목록을 쓴다
         made = sorted(f for f in os.listdir(PRED_DIR) if f.startswith("orders_"))
         orders_file = os.path.join(PRED_DIR, made[-1])
         log(f"시험 주문 목록: {made[-1]}")
-    elif now().strftime("%H:%M") < "08:30" and not args.skip_predict:
-        predict(bal["cash"], retrain=today.weekday() == 0)
+    elif not args.skip_predict:
+        early = now().strftime("%H:%M") < "08:30"
+        if early or not os.path.exists(orders_file):
+            # 늦게 시작했으면 재학습은 건너뛴다 (시간이 걸려 주문이 더 늦어짐)
+            predict(bal["cash"], retrain=early and today.weekday() == 0)
     if not os.path.exists(orders_file):
-        raise SystemExit(f"{orders_file} 이 없어요. 08:30 전에 시작하거나 model/daily.py 를 먼저 실행하세요.")
+        raise SystemExit(f"{orders_file} 이 없어요. 장 마감 후에는 다음 거래일 목록이 만들어져요.")
     orders = pd.read_csv(orders_file, dtype={"code": str})
     sells, buys = orders[orders["action"] == "sell"], orders[orders["action"] == "buy"]
     log(f"주문 목록: 매도 {len(sells)}건, 매수 {len(buys)}건")
