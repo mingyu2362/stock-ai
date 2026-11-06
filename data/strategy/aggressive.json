@@ -1,29 +1,29 @@
 {
  "position": {
-  "code": "180640",
-  "name": "한진칼",
-  "shares": 423,
-  "entry": 193350.118,
+  "code": "328130",
+  "name": "루닛",
+  "shares": 5436,
+  "entry": 14734.105,
   "entry_date": "2026-11-06",
-  "peak": 193350.118
+  "peak": 14734.105
  },
  "last_exit": {
   "date": "2026-11-06",
-  "time": "09:10",
-  "code": "078600",
-  "name": "대주전자재료",
-  "shares": 1086,
-  "price": 75573,
-  "entry": 86102.025,
-  "reason": "손절 (매수가 -12%)"
+  "time": "09:59",
+  "code": "180640",
+  "name": "한진칼",
+  "shares": 423,
+  "price": 189476,
+  "entry": 193350.118,
+  "reason": "수동 매도"
  },
  "rules": {
   "stop_loss": 0.12,
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 170148,
+ "stop": 12966,
  "stop_reason": "손절 (매수가 -12%)",
- "trail_from": 212685,
- "updated_at": "2026-11-06T09:38:54+09:00"
+ "trail_from": 16208,
+ "updated_at": "2026-11-06T10:01:46+09:00"
 }
