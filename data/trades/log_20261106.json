@@ -1,5 +1,14 @@
 {
- "sells": [],
+ "sells": [
+  {
+   "code": "078600",
+   "name": "대주전자재료",
+   "shares": 1086,
+   "order_no": "0000005777",
+   "time": "09:06:20",
+   "note": "공격형 손절 (매수가 -12%)"
+  }
+ ],
  "buys": [],
  "buys_done": true,
  "start_holdings": {
