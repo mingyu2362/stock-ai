@@ -16,7 +16,7 @@ export default function Today() {
           </div>
 
           <div className="card section">
-            <h2>오늘의 주문</h2>
+            <h2>오늘의 주문<span className="badge">안정형일 때 하는 매매예요</span></h2>
             <p className="sub">08:30~09:00 동시호가에 시장가로 제출. 수량은 전일 종가 기준이라 체결 금액은 조금 달라질 수 있어요.</p>
             {d.orders.length === 0 ? (
               <div className="empty">주문 없음 — 보유 종목을 그대로 유지해요</div>
