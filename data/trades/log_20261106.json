@@ -9,7 +9,18 @@
    "note": "공격형 손절 (매수가 -12%)"
   }
  ],
- "buys": [],
+ "buys": [
+  {
+   "code": "180640",
+   "name": "한진칼",
+   "shares": 415,
+   "limit": 195300,
+   "order_no": "0000011619",
+   "time": "09:35:23",
+   "filled": 415,
+   "checked_at": "09:36:24"
+  }
+ ],
  "buys_done": true,
  "start_holdings": {
   "078600": {
