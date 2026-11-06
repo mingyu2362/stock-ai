@@ -2,10 +2,10 @@
  "position": {
   "code": "180640",
   "name": "한진칼",
-  "shares": 415,
-  "entry": 193244.578,
+  "shares": 423,
+  "entry": 193350.118,
   "entry_date": "2026-11-06",
-  "peak": 193244.578
+  "peak": 193350.118
  },
  "last_exit": {
   "date": "2026-11-06",
@@ -22,8 +22,8 @@
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 170055,
+ "stop": 170148,
  "stop_reason": "손절 (매수가 -12%)",
- "trail_from": 212569,
- "updated_at": "2026-11-06T09:37:55+09:00"
+ "trail_from": 212685,
+ "updated_at": "2026-11-06T09:38:54+09:00"
 }
