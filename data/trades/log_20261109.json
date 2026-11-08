@@ -1,0 +1,12 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": true,
+ "start_holdings": {
+  "328130": {
+   "name": "루닛",
+   "shares": 5436,
+   "avg_price": 14734.105
+  }
+ }
+}
