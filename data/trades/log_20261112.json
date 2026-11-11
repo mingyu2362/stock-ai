@@ -1,0 +1,12 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": true,
+ "start_holdings": {
+  "030530": {
+   "name": "원익홀딩스",
+   "shares": 2888,
+   "avg_price": 30419.278
+  }
+ }
+}
