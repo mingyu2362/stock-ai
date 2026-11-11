@@ -1,29 +1,22 @@
 {
- "position": {
+ "position": null,
+ "last_exit": {
+  "date": "2026-11-11",
+  "time": "09:27",
   "code": "328130",
   "name": "루닛",
   "shares": 5436,
+  "price": 16201,
   "entry": 14734.105,
-  "entry_date": "2026-11-06",
-  "peak": 17570.0
- },
- "last_exit": {
-  "date": "2026-11-06",
-  "time": "09:59",
-  "code": "180640",
-  "name": "한진칼",
-  "shares": 423,
-  "price": 189476,
-  "entry": 193350.118,
-  "reason": "수동 매도"
+  "reason": "추적 익절 (고점 17,570 -8%)"
  },
  "rules": {
   "stop_loss": 0.12,
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 16164,
- "stop_reason": "추적 익절 (고점 17,570 -8%)",
- "trail_from": 16208,
- "updated_at": "2026-11-10T16:02:23+09:00"
+ "stop": null,
+ "stop_reason": null,
+ "trail_from": null,
+ "updated_at": "2026-11-11T09:27:01+09:00"
 }
