@@ -1,29 +1,29 @@
-{
+﻿{
  "position": {
+  "code": "180640",
+  "name": "한진칼",
+  "shares": 413,
+  "entry": 205565.375,
+  "entry_date": "2026-11-12",
+  "peak": 205565.375
+ },
+ "last_exit": {
+  "date": "2026-11-12",
+  "time": "15:05",
   "code": "030530",
   "name": "원익홀딩스",
   "shares": 2888,
+  "price": 29966,
   "entry": 30419.278,
-  "entry_date": "2026-11-11",
-  "peak": 31550.0
- },
- "last_exit": {
-  "date": "2026-11-11",
-  "time": "09:27",
-  "code": "328130",
-  "name": "루닛",
-  "shares": 5436,
-  "price": 16201,
-  "entry": 14734.105,
-  "reason": "추적 익절 (고점 17,570 -8%)"
+  "reason": "수동 매도 (AI 1위 한진칼로 교체)"
  },
  "rules": {
   "stop_loss": 0.12,
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 26769,
+ "stop": 180898,
  "stop_reason": "손절 (매수가 -12%)",
- "trail_from": 33461,
- "updated_at": "2026-11-11T23:51:49+09:00"
+ "trail_from": 226122,
+ "updated_at": "2026-11-12T15:05:04+09:00"
 }
