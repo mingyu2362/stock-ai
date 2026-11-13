@@ -1,5 +1,5 @@
 // 한국투자증권 모의투자 계좌 잔고 (Vercel 서버리스 함수, 개발 중에는 vite.config.js 가 같은 함수를 씀)
-// POST /api/account  { appKey, appSecret, account, token?, codes? } → { fetchedAt, summary, positions, orders, orderSummary, ordersByCode, token }
+// POST /api/account  { appKey, appSecret, account, token?, codes?, balanceOnly? }  (balanceOnly: 주문 내역 없이 잔고만) → { fetchedAt, summary, positions, orders, orderSummary, ordersByCode, token }
 //
 // 사용자 키는 사용자 브라우저에만 있고 요청마다 함께 온다. 서버는 저장·기록하지 않고 한투에 전달만 한다.
 // - 잔고·오늘 주문 내역 조회만 한다. 주문 기능은 일부러 넣지 않음 (키가 새도 이 서버로는 주문이 나갈 수 없게)
@@ -166,9 +166,10 @@ async function fetchBalance(ctx) {
 
 // 잔고 + 오늘 주문. 토큰 만료면 null
 // codes: 브라우저가 알려 준 오늘 주문 예정 종목 (팔고 없어진 종목은 잔고에 안 남으므로)
-async function fetchAll(ctx, codes) {
+async function fetchAll(ctx, codes, balanceOnly) {
   const balance = await fetchBalance(ctx);
   if (!balance) return null;
+  if (balanceOnly) return { fetchedAt: new Date().toISOString(), ...balance };
   await sleep(500);   // 모의투자는 초당 호출 수 제한이 낮다
   const orders = await fetchOrders(ctx);
   if (!orders) return null;
@@ -184,7 +185,7 @@ async function fetchAll(ctx, codes) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "POST 로만 호출합니다." });
   try {
-    const { appKey, appSecret, account, token, codes: rawCodes } = await readBody(req);
+    const { appKey, appSecret, account, token, codes: rawCodes, balanceOnly } = await readBody(req);
     const codes = (Array.isArray(rawCodes) ? rawCodes : []).filter((c) => /^[0-9A-Z]{6}$/.test(c)).slice(0, 20);
     if (typeof appKey !== "string" || typeof appSecret !== "string" || !appKey || !appSecret) {
       return send(res, 400, { error: "앱 키와 앱 시크릿을 입력하세요." });
@@ -200,10 +201,10 @@ export default async function handler(req, res) {
 
     let t = token?.value && token.expires - Date.now() > 10 * 60_000 ? token : null;
     const ctx = { appKey, appSecret, cano, prdt };
-    let result = t && await fetchAll({ ...ctx, token: t }, codes);
+    let result = t && await fetchAll({ ...ctx, token: t }, codes, balanceOnly);
     if (!result) {
       t = await getToken(appKey, appSecret);
-      result = await fetchAll({ ...ctx, token: t }, codes);
+      result = await fetchAll({ ...ctx, token: t }, codes, balanceOnly);
       if (!result) throw new Error("토큰이 거부됐습니다. 잠시 뒤 다시 시도하세요.");
     }
     send(res, 200, { ...result, token: t });

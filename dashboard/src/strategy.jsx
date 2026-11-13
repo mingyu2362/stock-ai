@@ -27,7 +27,7 @@ export function useMode() {
 }
 
 // 매매 프로그램(trade/aggressive.py)과 같은 계산: 지금 가격까지 넣은 고점으로 손절선을 다시 센다
-function liveStop(pos, rules, price) {
+export function liveStop(pos, rules, price) {
   const peak = Math.max(pos.peak, price || 0);
   if (peak >= pos.entry * (1 + rules.breakeven_at)) {
     return { stop: peak * (1 - rules.trail), peak, why: `추적 익절 (고점 -${rules.trail * 100}%)` };

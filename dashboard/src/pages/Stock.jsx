@@ -1,16 +1,69 @@
 import { useEffect, useState } from "react";
 import CandleChart from "../candle.jsx";
 import { marketOpen, Pct, pct, useJson, won } from "../lib.jsx";
+import { liveStop, useMode } from "../strategy.jsx";
+import { loadCreds, saveCreds } from "./Account.jsx";
 
 const INTERVALS = [
   { key: "day", label: "일봉" },
   { key: "week", label: "주봉" },
   { key: "month", label: "월봉" },
+  { key: "minute", label: "1분" },
+  { key: "minute5", label: "5분" },
+  { key: "minute10", label: "10분" },
+  { key: "minute30", label: "30분" },
+  { key: "minute60", label: "60분" },
 ];
 const REFRESH_MS = 30_000;
 
 const signed = (v) => `${v > 0 ? "+" : ""}${won(v)}`;
 const dirOf = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
+
+const SHOW_KEY = "chart-holding";   // 평단·손절선 표시 여부 (이 브라우저에만 기억)
+const loadShow = () => { try { return localStorage.getItem(SHOW_KEY) !== "off"; } catch { return true; } };
+
+// 내 계좌에서 이 종목 보유 현황. 키가 이 브라우저에 있을 때만, 종목을 열 때 한 번 (평단가는 장중에 거의 안 바뀜)
+function useAccountPosition(code) {
+  const [state, setState] = useState({ code: null, connected: false, position: null });
+  useEffect(() => {
+    const creds = loadCreds();
+    if (!creds) return;
+    let alive = true;
+    const { appKey, appSecret, account, token } = creds;
+    fetch("/api/account", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appKey, appSecret, account, token, balanceOnly: true }),
+    })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body.error || r.status);
+        if (body.token?.value !== token?.value) saveCreds({ ...creds, token: body.token });
+        if (alive) setState({ code, connected: true, position: body.positions.find((p) => p.code === code) || null });
+      })
+      .catch(() => { /* 계좌를 못 읽으면 공격형 보유 기록으로 대신 */ });
+    return () => { alive = false; };
+  }, [code]);
+  return state.code === code ? state : { connected: false, position: null };
+}
+
+// 평단가: 계좌 연결 시 한투 잔고, 아니면 공격형 보유 기록의 매수가. 손절선은 공격형 규칙에만 있음
+function holdingOf(d, acct, mode) {
+  if (!d) return null;
+  const aggr = mode?.mode === "aggressive" && mode.state?.position?.code === d.code ? mode.state.position : null;
+  const base = acct.connected
+    ? acct.position && { avg: acct.position.avgPrice, shares: acct.position.shares }
+    : aggr && { avg: aggr.entry, shares: aggr.shares };
+  if (!base || !base.avg) return null;
+  const s = aggr && liveStop(aggr, mode.state.rules, d.price);
+  return {
+    ...base,
+    price: d.price,
+    pnl: (d.price - base.avg) * base.shares,
+    ratio: (d.price / base.avg - 1) * 100,
+    stop: s ? Math.round(s.stop) : null,
+    stopWhy: s?.why,
+  };
+}
 
 function goBack() {
   if (window.history.length > 1) window.history.back();
@@ -23,6 +76,13 @@ export default function Stock({ code }) {
   const today = useJson("today.json").data;
   const universeData = useJson("universe.json").data;
   const universe = universeData || {};
+  const mode = useMode().data;
+  const acct = useAccountPosition(code);
+  const [show, setShow] = useState(loadShow);
+  const toggleShow = (e) => {
+    setShow(e.target.checked);
+    try { localStorage.setItem(SHOW_KEY, e.target.checked ? "on" : "off"); } catch { /* 무시 */ }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -47,6 +107,7 @@ export default function Stock({ code }) {
   const top = today?.top?.find((t) => t.code === code);
   const sellRank = today?.strategy?.sell_rank;
   const time = d?.tradedAt?.slice(11, 16);
+  const holding = holdingOf(d, acct, mode);
 
   return (
     <>
@@ -100,10 +161,15 @@ export default function Stock({ code }) {
                   <button key={t.key} aria-pressed={interval === t.key} onClick={() => setInterval_(t.key)}>{t.label}</button>
                 ))}
               </div>
+              {holding && (
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                  <input type="checkbox" checked={show} onChange={toggleShow} /> 평단·손절선
+                </label>
+              )}
               <span className="muted" style={{ fontSize: 12 }}>드래그로 이동 · 휠로 확대/축소{marketOpen() ? " · 30초마다 갱신" : ""}</span>
             </div>
             {d.interval === interval && d.candles.length > 0
-              ? <CandleChart candles={d.candles} interval={interval} />
+              ? <CandleChart candles={d.candles} interval={interval} holding={show ? holding : null} />
               : <div className="empty">{d.candles.length ? "불러오는 중…" : "시세 데이터가 없어요."}</div>}
           </div>
 

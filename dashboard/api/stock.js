@@ -1,8 +1,11 @@
 // 종목 상세: 네이버 증권 시세·종목 정보·투자자 동향 중계 (Vercel 서버리스 함수, 개발 중에는 vite.config.js 가 같은 함수를 씀)
-// GET /api/stock?code=005930&interval=day|week|month
+// GET /api/stock?code=005930&interval=day|week|month|minute|minute5|minute10|minute30|minute60
 // 공식 API가 아니라 응답 형식이 바뀌면 고쳐야 한다.
 
-const INTERVALS = { day: 3, week: 10, month: 20 };   // 받아 올 기간 (년)
+// 받아 올 기간 (일봉 이상은 년, 분봉은 일). 네이버는 분봉을 최근 1주일 남짓만 준다.
+const INTERVALS = { day: 3, week: 10, month: 20 };
+const MINUTES = new Set(["minute", "minute5", "minute10", "minute30", "minute60"]);
+const MINUTE_DAYS = 10;
 const HEADERS = { "User-Agent": "Mozilla/5.0" };
 
 function send(res, status, body, cache) {
@@ -25,13 +28,15 @@ export default async function handler(req, res) {
   const params = new URL(req.url, "http://localhost").searchParams;
   const code = params.get("code") || "";
   const interval = params.get("interval") || "day";
-  if (!/^[0-9A-Z]{6}$/.test(code) || !(interval in INTERVALS)) {
+  if (!/^[0-9A-Z]{6}$/.test(code) || !(interval in INTERVALS || MINUTES.has(interval))) {
     return send(res, 400, { error: "code(6자리) 또는 interval 값이 잘못됐습니다." });
   }
 
   const end = new Date(Date.now() + 9 * 3600_000);   // 한국 날짜
   const start = new Date(end);
-  start.setFullYear(start.getFullYear() - INTERVALS[interval]);
+  const intraday = MINUTES.has(interval);
+  if (intraday) start.setDate(start.getDate() - MINUTE_DAYS);
+  else start.setFullYear(start.getFullYear() - INTERVALS[interval]);
 
   try {
     const [basic, integ, chart] = await Promise.all([
@@ -42,7 +47,13 @@ export default async function handler(req, res) {
     ]);
     const candles = (Array.isArray(chart) ? chart : [])
       .filter((c) => c.openPrice > 0)   // 거래정지 등으로 시가가 0인 날 제외
-      .map((c) => ({
+      .map((c) => (intraday ? {
+        // 분봉: 한국 시각을 그대로 UTC로 둔 초 단위 시각 (차트가 UTC로 그리므로 축에 한국 시각이 찍힘)
+        time: Date.UTC(+c.localDateTime.slice(0, 4), +c.localDateTime.slice(4, 6) - 1, +c.localDateTime.slice(6, 8),
+          +c.localDateTime.slice(8, 10), +c.localDateTime.slice(10, 12)) / 1000,
+        open: c.openPrice, high: c.highPrice, low: c.lowPrice, close: c.currentPrice,
+        volume: c.accumulatedTradingVolume,
+      } : {
         time: `${c.localDate.slice(0, 4)}-${c.localDate.slice(4, 6)}-${c.localDate.slice(6, 8)}`,
         open: c.openPrice, high: c.highPrice, low: c.lowPrice, close: c.closePrice,
         volume: c.accumulatedTradingVolume,

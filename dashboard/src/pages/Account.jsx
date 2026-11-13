@@ -7,7 +7,7 @@ const START_CASH = 100_000_000;   // 대회 시작 자금
 const STORE_KEY = "kis-account";
 
 // 키는 이 브라우저에만 둔다. 기본은 sessionStorage (탭을 닫으면 지워짐), "이 기기에 기억"을 고르면 localStorage
-function loadCreds() {
+export function loadCreds() {
   for (const store of ["sessionStorage", "localStorage"]) {
     try {
       const v = JSON.parse(window[store].getItem(STORE_KEY));
@@ -17,7 +17,7 @@ function loadCreds() {
   return null;
 }
 
-function saveCreds(creds) {
+export function saveCreds(creds) {
   const { remember, ...data } = creds;
   try {
     (remember ? localStorage : sessionStorage).setItem(STORE_KEY, JSON.stringify(data));

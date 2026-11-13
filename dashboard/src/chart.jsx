@@ -12,7 +12,7 @@ export function readColors() {
   return {
     series: [get("--series-1"), get("--series-2"), get("--series-3")],
     grid: get("--grid"), axis: get("--axis"), muted: get("--muted"), text2: get("--text-2"),
-    surface: get("--surface"), shade: get("--shade"), critical: get("--critical"),
+    surface: get("--surface"), shade: get("--shade"), critical: get("--critical"), warning: get("--warning"),
     up: get("--up"), down: get("--down"), upSoft: `${get("--up")}66`, downSoft: `${get("--down")}66`,
   };
 }
