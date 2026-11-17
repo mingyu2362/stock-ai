@@ -1,0 +1,12 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": true,
+ "start_holdings": {
+  "180640": {
+   "name": "한진칼",
+   "shares": 406,
+   "avg_price": 204577.586
+  }
+ }
+}
