@@ -1,29 +1,29 @@
 {
  "position": {
+  "code": "030530",
+  "name": "원익홀딩스",
+  "shares": 2568,
+  "entry": 33840.771,
+  "entry_date": "2026-11-18",
+  "peak": 33840.771
+ },
+ "last_exit": {
+  "date": "2026-11-18",
+  "time": "09:10",
   "code": "180640",
   "name": "한진칼",
   "shares": 406,
+  "price": 217946,
   "entry": 204577.586,
-  "entry_date": "2026-11-13",
-  "peak": 221500.0
- },
- "last_exit": {
-  "date": "2026-11-13",
-  "time": "09:44",
-  "code": "030530",
-  "name": "원익홀딩스",
-  "shares": 2571,
-  "price": 32391,
-  "entry": 32995.255,
-  "reason": "수동 매도 (한진칼로 교체)"
+  "reason": "수동 매도 (원익홀딩스로 교체)"
  },
  "rules": {
   "stop_loss": 0.12,
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 180028,
+ "stop": 29780,
  "stop_reason": "손절 (매수가 -12%)",
- "trail_from": 225035,
- "updated_at": "2026-11-17T16:02:06+09:00"
+ "trail_from": 37225,
+ "updated_at": "2026-11-18T09:10:43+09:00"
 }
