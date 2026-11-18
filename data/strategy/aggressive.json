@@ -2,8 +2,8 @@
  "position": {
   "code": "030530",
   "name": "원익홀딩스",
-  "shares": 2568,
-  "entry": 33840.771,
+  "shares": 2610,
+  "entry": 33836.896,
   "entry_date": "2026-11-18",
   "peak": 33840.771
  },
@@ -22,8 +22,8 @@
   "breakeven_at": 0.1,
   "trail": 0.08
  },
- "stop": 29780,
+ "stop": 29776,
  "stop_reason": "손절 (매수가 -12%)",
- "trail_from": 37225,
- "updated_at": "2026-11-18T09:10:43+09:00"
+ "trail_from": 37221,
+ "updated_at": "2026-11-18T09:12:26+09:00"
 }
