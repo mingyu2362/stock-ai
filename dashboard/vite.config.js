@@ -4,6 +4,7 @@ import account from "./api/account.js";
 import stock from "./api/stock.js";
 import naver from "./api/naver.js";
 import mode from "./api/mode.js";
+import quote from "./api/quote.js";
 
 // 개발 서버에서도 /api/* 가 동작하도록 Vercel 함수와 같은 코드를 연결한다
 const devApi = {
@@ -13,6 +14,7 @@ const devApi = {
     server.middlewares.use("/api/account", (req, res) => account(req, res));
     server.middlewares.use("/api/stock", (req, res) => stock(req, res));
     server.middlewares.use("/api/mode", (req, res) => mode(req, res));
+    server.middlewares.use("/api/quote", (req, res) => quote(req, res));
   },
 };
 

@@ -3,15 +3,16 @@ import { eok, marketOpen, Pct, StockLink, Tile, useJson, won } from "../lib.jsx"
 import StrategyCard, { useMode } from "../strategy.jsx";
 
 const REFRESH_MS = 10_000;
-const START_CASH = 100_000_000;   // 대회 시작 자금
+const START_CASH = 100_000_000;   // 팀 모의투자대회 시작 자금 (모의투자 계좌에서만 표시)
 const STORE_KEY = "kis-account";
+export const SERVER_LABEL = { real: "실전", mock: "모의투자" };
 
 // 키는 이 브라우저에만 둔다. 기본은 sessionStorage (탭을 닫으면 지워짐), "이 기기에 기억"을 고르면 localStorage
 export function loadCreds() {
   for (const store of ["sessionStorage", "localStorage"]) {
     try {
       const v = JSON.parse(window[store].getItem(STORE_KEY));
-      if (v?.appKey) return { ...v, remember: store === "localStorage" };
+      if (v?.appKey) return { server: "mock", ...v, remember: store === "localStorage" };   // 예전 저장분은 모의투자
     } catch { /* 저장소를 못 쓰는 환경 */ }
   }
   return null;
@@ -40,8 +41,11 @@ export default function Account() {
   if (!creds) {
     return (
       <>
-        <StrategyCard m={mode} />
         <ConnectForm onConnect={(c) => { saveCreds(c); setCreds(c); }} />
+        <details className="card team-mode">
+          <summary>팀 AI 자동매매 설정 (팀원용)</summary>
+          <StrategyCard m={mode} />
+        </details>
       </>
     );
   }
@@ -49,15 +53,19 @@ export default function Account() {
 }
 
 function ConnectForm({ onConnect }) {
-  const [form, setForm] = useState({ appKey: "", appSecret: "", account: "", remember: false });
+  const [form, setForm] = useState({ server: "real", appKey: "", appSecret: "", account: "", remember: false });
   const [state, setState] = useState({ busy: false, error: null });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value.trim() }));
+  const real = form.server === "real";
 
   // 연결 전에 한 번 조회해 키가 맞는지 확인하고, 받은 토큰도 같이 저장
   const submit = (e) => {
     e.preventDefault();
     setState({ busy: true, error: null });
-    fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
+    fetch("/api/account", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, balanceOnly: true }),
+    })
       .then(async (r) => {
         const body = await r.json();
         if (!r.ok) throw new Error(body.error || r.status);
@@ -69,16 +77,24 @@ function ConnectForm({ onConnect }) {
   return (
     <div className="grid two">
       <div className="card">
-        <h2>내 모의투자 계좌 연결</h2>
-        <p className="sub">한국투자증권 KIS Developers 에서 발급받은 모의투자 앱 키로 내 계좌만 조회해요.</p>
+        <h2>내 한국투자증권 계좌 연결</h2>
+        <p className="sub">KIS Developers 에서 발급받은 앱 키로 <b>내 계좌 잔고·주문 내역을 조회</b>해요. 처음이라면 <a href="#guide">API 연결 가이드</a>를 먼저 보세요.</p>
         <form className="form" onSubmit={submit} autoComplete="off">
-          <label>앱 키 (APP KEY)
+          <div className="server-pick" role="radiogroup" aria-label="계좌 종류">
+            {[["real", "실전 계좌", "실제 돈이 들어 있는 내 계좌"], ["mock", "모의투자 계좌", "한투 모의투자 신청 계좌"]].map(([k, t, d]) => (
+              <label key={k} className={form.server === k ? "on" : ""}>
+                <input type="radio" name="server" value={k} checked={form.server === k} onChange={set("server")} />
+                <b>{t}</b><span>{d}</span>
+              </label>
+            ))}
+          </div>
+          <label>앱 키 (APP KEY) · {SERVER_LABEL[form.server]}용
             <input type="password" value={form.appKey} onChange={set("appKey")} required spellCheck={false} />
           </label>
           <label>앱 시크릿 (APP SECRET)
             <input type="password" value={form.appSecret} onChange={set("appSecret")} required spellCheck={false} />
           </label>
-          <label>모의투자 계좌번호
+          <label>{real ? "종합계좌 번호" : "모의투자 계좌번호"}
             <input type="text" inputMode="numeric" placeholder="12345678-01" value={form.account}
               onChange={set("account")} required pattern="\d{8}-?01" title="8자리-01 형식 (예: 12345678-01)" />
           </label>
@@ -86,18 +102,22 @@ function ConnectForm({ onConnect }) {
             <input type="checkbox" checked={form.remember} onChange={set("remember")} />
             이 기기에 기억하기 (개인 기기에서만)
           </label>
+          {real && form.remember && (
+            <p className="warn-text">실전 키는 유출되면 다른 사람이 내 계좌로 주문할 수 있어요. 내 개인 PC가 아니면 끄세요.</p>
+          )}
           {state.error && <p className="error-text">{String(state.error.message)}</p>}
-          <button className="btn-primary" disabled={state.busy}>{state.busy ? "확인 중…" : "연결"}</button>
+          <button className="btn-primary" disabled={state.busy}>{state.busy ? "확인 중…" : `${SERVER_LABEL[form.server]} 계좌 연결`}</button>
         </form>
       </div>
       <div className="card">
         <h2>키는 어떻게 다뤄지나요</h2>
         <ul className="notes">
+          <li>이 사이트는 <b>조회만</b> 해요. 실전 계좌여도 주문 기능은 서버에 아예 없어요. (연습 주문은 <a href="#paper">모의투자</a> 탭에서 가상 자금으로)</li>
           <li>키는 <b>이 브라우저에만</b> 저장돼요. 서버는 조회할 때 한투에 전달만 하고 저장하거나 기록하지 않아요.</li>
           <li>기본은 탭을 닫으면 지워져요. "이 기기에 기억하기"를 켜면 연결 해제 전까지 남아요.</li>
-          <li>이 사이트는 <b>잔고 조회만</b> 해요. 주문 기능은 서버에 아예 없어요.</li>
+          <li><b>실전 키는 비밀번호와 같아요.</b> 다른 사람에게 보여 주거나, 카톡·깃허브·캡처에 올리지 마세요.</li>
           <li>PC방·공용 컴퓨터에서는 쓰지 말고, 다 보면 "연결 해제"를 눌러 주세요.</li>
-          <li>키가 새었다고 생각되면 KIS Developers 에서 키를 재발급하면 예전 키는 바로 무효가 돼요.</li>
+          <li>키가 새었다고 생각되면 KIS Developers 에서 바로 재발급하세요. 예전 키는 즉시 무효가 돼요.</li>
         </ul>
       </div>
     </div>
@@ -117,10 +137,10 @@ function Balance({ creds, mode, onDisconnect }) {
     let alive = true;
     const load = () => {
       setState((s) => ({ ...s, loading: true }));
-      const { appKey, appSecret, account } = creds;
+      const { server, appKey, appSecret, account } = creds;
       fetch("/api/account", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appKey, appSecret, account, token: token.current, codes: planned.current }),
+        body: JSON.stringify({ server, appKey, appSecret, account, token: token.current, codes: planned.current }),
       })
         .then(async (r) => {
           const body = await r.json();
@@ -144,14 +164,16 @@ function Balance({ creds, mode, onDisconnect }) {
   const aggressive = mode.data?.mode === "aggressive";
   const sellRank = aggressive ? null : today?.strategy?.sell_rank;   // 공격형은 순위로 팔지 않음
   const time = d && new Date(d.fetchedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const real = creds.server === "real";
 
   return (
     <>
       <div className="filters">
         <button className="icon-btn" onClick={() => setTick((t) => t + 1)} disabled={state.loading}>새로고침</button>
         <button className="icon-btn" onClick={onDisconnect}>연결 해제</button>
+        <span className={`badge ${real ? "real" : "contest"}`}>{SERVER_LABEL[creds.server]}</span>
         <span className="muted" style={{ fontSize: 12 }}>
-          계좌 {maskAccount(creds.account)} · {marketOpen() ? "장중 · 10초마다 갱신" : "장 마감 · 새로고침 버튼으로 갱신"}{time ? ` · ${time} 조회` : ""}
+          계좌 {maskAccount(creds.account)} · 조회 전용 · {marketOpen() ? "장중 · 10초마다 갱신" : "장 마감 · 새로고침 버튼으로 갱신"}{time ? ` · ${time} 조회` : ""}
         </span>
       </div>
 
@@ -166,20 +188,25 @@ function Balance({ creds, mode, onDisconnect }) {
           <div className="grid tiles">
             <Tile label="총 평가금액" value={`${won(d.summary.total)}원`}
               note={<>전일 대비 <Pct v={d.summary.prevTotal ? (d.summary.total / d.summary.prevTotal - 1) * 100 : null} digits={2} /></>} />
-            <Tile label="대회 수익률 (시작 1억)" value={<Pct v={(d.summary.total / START_CASH - 1) * 100} digits={2} />}
-              note={`${d.summary.total >= START_CASH ? "+" : ""}${won(d.summary.total - START_CASH)}원`} />
+            {real ? (
+              <Tile label="오늘 손익" value={<Pct v={d.summary.prevTotal ? (d.summary.total / d.summary.prevTotal - 1) * 100 : null} digits={2} />}
+                note={d.summary.prevTotal ? `${d.summary.total >= d.summary.prevTotal ? "+" : ""}${won(d.summary.total - d.summary.prevTotal)}원 (전일 총자산 대비)` : "전일 기록 없음"} />
+            ) : (
+              <Tile label="모의 수익률 (시작 1억)" value={<Pct v={(d.summary.total / START_CASH - 1) * 100} digits={2} />}
+                note={`${d.summary.total >= START_CASH ? "+" : ""}${won(d.summary.total - START_CASH)}원`} />
+            )}
             <Tile label="보유 종목 평가손익" value={<Pct v={d.summary.cost ? (d.summary.pnl / d.summary.cost) * 100 : null} digits={2} />}
               note={`${d.summary.pnl > 0 ? "+" : ""}${won(d.summary.pnl)}원 · 평가 ${eok(d.summary.stockValue)}`} />
             <Tile label="예수금" value={`${eok(d.summary.cash)}원`}
               note={`주식 비중 ${d.summary.total ? ((d.summary.stockValue / d.summary.total) * 100).toFixed(0) : 0}%`} />
           </div>
 
-          <StrategyCard m={mode} positions={d.positions} />
+          {!real && <StrategyCard m={mode} positions={d.positions} />}
 
           <div className="card">
             <h2>보유 종목 {d.positions.length}개</h2>
             <p className="sub">
-              한국투자증권 모의투자 계좌 실시간 잔고. AI 순위는 {today?.date ?? "–"} 예측 기준이며,
+              한국투자증권 {SERVER_LABEL[creds.server]} 계좌 실시간 잔고. AI 순위는 {today?.date ?? "–"} 예측 기준이며,
               {aggressive ? " 공격형이라 순위와 상관없이 손절선에서만 팔아요." : sellRank ? ` ${sellRank}위 밖으로 밀리면 다음 날 시가에 팔아요.` : ""}
             </p>
             {d.positions.length === 0 ? (

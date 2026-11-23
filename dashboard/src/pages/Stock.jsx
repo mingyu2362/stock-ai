@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import CandleChart from "../candle.jsx";
 import { marketOpen, Pct, pct, useJson, won } from "../lib.jsx";
+import { OrderBook, OrderPanel } from "../order.jsx";
+import { usePaper } from "../paper.js";
 import { liveStop, useMode } from "../strategy.jsx";
+import { Flash, StockAvatar } from "../ui.jsx";
+import { toggleWatch, useWatch } from "../watch.js";
 import { loadCreds, saveCreds } from "./Account.jsx";
 
 const INTERVALS = [
@@ -29,10 +33,10 @@ function useAccountPosition(code) {
     const creds = loadCreds();
     if (!creds) return;
     let alive = true;
-    const { appKey, appSecret, account, token } = creds;
+    const { server, appKey, appSecret, account, token } = creds;
     fetch("/api/account", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appKey, appSecret, account, token, balanceOnly: true }),
+      body: JSON.stringify({ server, appKey, appSecret, account, token, balanceOnly: true }),
     })
       .then(async (r) => {
         const body = await r.json();
@@ -46,15 +50,16 @@ function useAccountPosition(code) {
   return state.code === code ? state : { connected: false, position: null };
 }
 
-// 평단가: 계좌 연결 시 한투 잔고, 아니면 공격형 보유 기록의 매수가. 손절선은 공격형 규칙에만 있음
-function holdingOf(d, acct, mode) {
+// 평단가: 계좌 연결 시 한투 잔고, 없으면 가상 모의투자 보유, 그것도 없으면 팀 공격형 보유 기록의 매수가.
+// 손절선은 팀 공격형 규칙에만 있음
+function holdingOf(d, acct, mode, paperPos) {
   if (!d) return null;
   const aggr = mode?.mode === "aggressive" && mode.state?.position?.code === d.code ? mode.state.position : null;
-  const base = acct.connected
-    ? acct.position && { avg: acct.position.avgPrice, shares: acct.position.shares }
-    : aggr && { avg: aggr.entry, shares: aggr.shares };
+  const base = (acct.position && { avg: acct.position.avgPrice, shares: acct.position.shares, src: "계좌" })
+    || (paperPos && { avg: paperPos.avg, shares: paperPos.shares, src: "모의" })
+    || (!acct.connected && aggr && { avg: aggr.entry, shares: aggr.shares, src: "팀" });
   if (!base || !base.avg) return null;
-  const s = aggr && liveStop(aggr, mode.state.rules, d.price);
+  const s = base.src === "팀" && liveStop(aggr, mode.state.rules, d.price);
   return {
     ...base,
     price: d.price,
@@ -74,10 +79,12 @@ export default function Stock({ code }) {
   const [interval, setInterval_] = useState("day");
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const today = useJson("today.json").data;
-  const universeData = useJson("universe.json").data;
-  const universe = universeData || {};
+  const universe = useJson("universe.json").data || {};
   const mode = useMode().data;
   const acct = useAccountPosition(code);
+  const paper = usePaper();
+  const watch = useWatch();
+  const [picked, setPicked] = useState(null);
   const [show, setShow] = useState(loadShow);
   const toggleShow = (e) => {
     setShow(e.target.checked);
@@ -107,11 +114,12 @@ export default function Stock({ code }) {
   const top = today?.top?.find((t) => t.code === code);
   const sellRank = today?.strategy?.sell_rank;
   const time = d?.tradedAt?.slice(11, 16);
-  const holding = holdingOf(d, acct, mode);
+  const holding = holdingOf(d, acct, mode, paper?.positions[code]);
+  const watched = watch.some((w) => w.code === code);
 
   return (
     <>
-      <div className="filters">
+      <div className="crumb">
         <button className="icon-btn" onClick={goBack}>← 뒤로</button>
       </div>
 
@@ -120,22 +128,27 @@ export default function Stock({ code }) {
 
       {d && (
         <>
-          <div className="card section stock-head">
+          <div className={`card section stock-head ${dirOf(d.change)}`}>
             <div>
               <h2 className="stock-name">
-                {d.name} <span className="muted">{d.code}</span>
+                <button className={`star big ${watched ? "on" : ""}`} onClick={() => toggleWatch(d.code, d.name)}
+                  aria-label={watched ? "관심종목 해제" : "관심종목 추가"} title={watched ? "관심종목 해제" : "관심종목 추가"}>
+                  {watched ? "★" : "☆"}
+                </button>
+                <StockAvatar code={d.code} name={d.name} size={34} />
+                {d.name} <span className="muted code">{d.code}</span>
                 {d.market && <span className="badge">{d.market}</span>}
-                {universe[d.code] && <span className="badge contest">대회</span>}
-                {universeData && !universe[d.code] && <span className="badge blocked">대회 매매 불가</span>}
+                {universe[d.code] && <span className="badge contest">AI 분석 종목</span>}
               </h2>
               <div className="stock-price">
-                <b className={dirOf(d.change)}>{won(d.price)}</b>
+                <Flash value={d.price}><b className={dirOf(d.change)}>{won(d.price)}<small>원</small></b></Flash>
                 <span className={dirOf(d.change)}>
                   {d.change > 0 ? "▲" : d.change < 0 ? "▼" : ""} {won(Math.abs(d.change))} ({pct(d.ratio, { digits: 2 })})
                 </span>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                {d.open ? "장중" : "장 마감"}{time ? ` · ${time} 기준` : ""} · 출처 네이버 증권
+                <span className={`live-dot ${d.open ? "on" : ""}`} />{d.open ? "장중 실시간" : "장 마감"}{time ? ` · ${time} 기준` : ""} · 출처 네이버 증권
+                {holding && <> · <b className={dirOf(holding.pnl)}>{holding.src === "모의" ? "모의 보유" : holding.src === "계좌" ? "내 계좌 보유" : "팀 보유"} {won(holding.shares)}주 {signed(Math.round(holding.pnl))}원 ({pct(holding.ratio, { digits: 2 })})</b></>}
               </p>
             </div>
             <div className="ai-box">
@@ -144,88 +157,97 @@ export default function Stock({ code }) {
                 <>
                   <div className="value">{rank}위 <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>/ {today.universe_size}</span></div>
                   <div className="note">
-                    {rank <= today.strategy.top_n ? "매수 대상" : rank <= sellRank ? `보유 중이면 유지 (${sellRank}위 이내)` : `보유 중이면 매도 (${sellRank}위 밖)`}
+                    {rank <= today.strategy.top_n ? "AI 매수 대상" : rank <= sellRank ? `보유 유지 구간 (${sellRank}위 이내)` : `AI라면 매도 (${sellRank}위 밖)`}
                     {" · "}{today.date} 예측
                   </div>
                 </>
               ) : (
-                <div className="note">대회 거래 가능 종목(코스피200·코스닥150)이 아니라 대회에서 매매할 수 없고, AI 순위도 없어요</div>
+                <div className="note">AI 분석 대상(코스피200·코스닥150)이 아니라 AI 순위가 없어요</div>
               )}
             </div>
           </div>
 
-          <div className="card section">
-            <div className="filters" style={{ marginBottom: 8 }}>
-              <div className="seg" role="group" aria-label="봉 주기">
-                {INTERVALS.map((t) => (
-                  <button key={t.key} aria-pressed={interval === t.key} onClick={() => setInterval_(t.key)}>{t.label}</button>
-                ))}
-              </div>
-              {holding && (
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
-                  <input type="checkbox" checked={show} onChange={toggleShow} /> 평단·손절선
-                </label>
-              )}
-              <span className="muted" style={{ fontSize: 12 }}>드래그로 이동 · 휠로 확대/축소{marketOpen() ? " · 30초마다 갱신" : ""}</span>
-            </div>
-            {d.interval === interval && d.candles.length > 0
-              ? <CandleChart candles={d.candles} interval={interval} holding={show ? holding : null} />
-              : <div className="empty">{d.candles.length ? "불러오는 중…" : "시세 데이터가 없어요."}</div>}
-          </div>
-
-          <div className="grid two">
-            <div className="card">
-              <h2>종목 정보</h2>
-              <p className="sub">기준 시점이 있는 값은 괄호 안 날짜 기준이에요.</p>
-              <dl className="info-grid">
-                {d.infos.map((i) => (
-                  <div key={i.key}>
-                    <dt>{i.key}{i.desc && <span className="muted"> ({i.desc})</span>}</dt>
-                    <dd className="num">{i.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-
-            <div className="card">
-              <h2>투자자별 순매수 (주)</h2>
-              <p className="sub">최근 거래일 기준, 개인은 장 마감 후 확정돼요.</p>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr><th className="l">날짜</th><th>종가</th><th>등락률</th><th>외국인</th><th>기관</th><th>개인</th></tr>
-                  </thead>
-                  <tbody>
-                    {d.deals.map((r) => (
-                      <tr key={r.date}>
-                        <td className="l">{r.date}</td>
-                        <td className="num">{won(r.close)}</td>
-                        <td><Pct v={r.ratio} digits={2} /></td>
-                        {[r.foreign, r.organ, r.individual].map((v, i) => (
-                          <td key={i} className={`num ${dirOf(v)}`}>{signed(v)}</td>
-                        ))}
-                      </tr>
+          <div className="stock-layout">
+            <div className="stock-main">
+              <div className="card section chart-card">
+                <div className="filters" style={{ marginBottom: 8 }}>
+                  <div className="seg" role="group" aria-label="봉 주기">
+                    {INTERVALS.map((t) => (
+                      <button key={t.key} aria-pressed={interval === t.key} onClick={() => setInterval_(t.key)}>{t.label}</button>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                  {holding && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                      <input type="checkbox" checked={show} onChange={toggleShow} /> 평단{holding.stop ? "·손절선" : ""}
+                    </label>
+                  )}
+                  <span className="muted" style={{ fontSize: 12 }}>드래그로 이동 · 휠로 확대/축소{marketOpen() ? " · 30초마다 갱신" : ""}</span>
+                </div>
+                {d.interval === interval && d.candles.length > 0
+                  ? <CandleChart candles={d.candles} interval={interval} holding={show ? holding : null} />
+                  : <div className="empty">{d.candles.length ? "불러오는 중…" : "시세 데이터가 없어요."}</div>}
               </div>
+
+              <div className="grid two">
+                <div className="card">
+                  <h2>종목 정보</h2>
+                  <p className="sub">기준 시점이 있는 값은 괄호 안 날짜 기준이에요.</p>
+                  <dl className="info-grid">
+                    {d.infos.map((i) => (
+                      <div key={i.key}>
+                        <dt>{i.key}{i.desc && <span className="muted"> ({i.desc})</span>}</dt>
+                        <dd className="num">{i.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+
+                <div className="card">
+                  <h2>투자자별 순매수 (주)</h2>
+                  <p className="sub">최근 거래일 기준, 개인은 장 마감 후 확정돼요.</p>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th className="l">날짜</th><th>종가</th><th>등락률</th><th>외국인</th><th>기관</th><th>개인</th></tr>
+                      </thead>
+                      <tbody>
+                        {d.deals.map((r) => (
+                          <tr key={r.date}>
+                            <td className="l">{r.date}</td>
+                            <td className="num">{won(r.close)}</td>
+                            <td><Pct v={r.ratio} digits={2} /></td>
+                            {[r.foreign, r.organ, r.individual].map((v, i) => (
+                              <td key={i} className={`num ${dirOf(v)}`}>{signed(v)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {top && (
+                <div className="card" style={{ marginTop: 12 }}>
+                  <h2>AI가 본 차트 지표</h2>
+                  <p className="sub">{today.base_close} 종가까지의 값이에요 (모델 입력의 일부).</p>
+                  <dl className="info-grid">
+                    <div><dt>1일 수익률</dt><dd><Pct v={top.ret_1d} ratio digits={2} /></dd></div>
+                    <div><dt>5일 수익률</dt><dd><Pct v={top.ret_5d} ratio digits={2} /></dd></div>
+                    <div><dt>20일 수익률</dt><dd><Pct v={top.ret_20d} ratio digits={2} /></dd></div>
+                    <div><dt>RSI(14)</dt><dd className="num">{top.rsi_14?.toFixed(1)}</dd></div>
+                    <div><dt>거래량 (20일 평균 대비)</dt><dd className="num">{top.vol_ratio_20?.toFixed(2)}배</dd></div>
+                    <div><dt>20일 변동성 (일)</dt><dd className="num">{(top.volat_20 * 100).toFixed(2)}%</dd></div>
+                  </dl>
+                </div>
+              )}
+            </div>
+
+            <div className="stock-side">
+              <OrderBook code={d.code} price={d.price} prevClose={d.price - d.change} onPick={(p) => setPicked({ price: p, at: Date.now() })} />
+              <OrderPanel code={d.code} name={d.name} price={d.price} picked={picked} />
             </div>
           </div>
-
-          {top && (
-            <div className="card" style={{ marginTop: 12 }}>
-              <h2>AI가 본 차트 지표</h2>
-              <p className="sub">{today.base_close} 종가까지의 값이에요 (모델 입력의 일부).</p>
-              <dl className="info-grid">
-                <div><dt>1일 수익률</dt><dd><Pct v={top.ret_1d} ratio digits={2} /></dd></div>
-                <div><dt>5일 수익률</dt><dd><Pct v={top.ret_5d} ratio digits={2} /></dd></div>
-                <div><dt>20일 수익률</dt><dd><Pct v={top.ret_20d} ratio digits={2} /></dd></div>
-                <div><dt>RSI(14)</dt><dd className="num">{top.rsi_14?.toFixed(1)}</dd></div>
-                <div><dt>거래량 (20일 평균 대비)</dt><dd className="num">{top.vol_ratio_20?.toFixed(2)}배</dd></div>
-                <div><dt>20일 변동성 (일)</dt><dd className="num">{(top.volat_20 * 100).toFixed(2)}%</dd></div>
-              </dl>
-            </div>
-          )}
         </>
       )}
     </>

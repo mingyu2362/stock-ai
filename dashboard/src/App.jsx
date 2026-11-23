@@ -1,20 +1,27 @@
 import { useEffect, useState } from "react";
 import { ColorContext, readColors } from "./chart.jsx";
 import Account from "./pages/Account.jsx";
+import Guide from "./pages/Guide.jsx";
 import Live from "./pages/Live.jsx";
 import Market from "./pages/Market.jsx";
+import Paper from "./pages/Paper.jsx";
 import Performance from "./pages/Performance.jsx";
 import Research from "./pages/Research.jsx";
 import Stock from "./pages/Stock.jsx";
 import Today from "./pages/Today.jsx";
+import StockSearch from "./search.jsx";
+import { IndexTicker, MarketClock, PaperMatcher, WatchSide } from "./shell.jsx";
+import { Toaster } from "./ui.jsx";
 
 const TABS = [
-  { key: "today", label: "오늘의 추천", Page: Today },
-  { key: "account", label: "계좌 현황", Page: Account },
-  { key: "performance", label: "실전 성과", Page: Performance },
-  { key: "market", label: "시장·공포지수", Page: Market },
+  { key: "today", label: "홈", Page: Today },
+  { key: "paper", label: "모의투자", Page: Paper },
+  { key: "account", label: "내 계좌", Page: Account },
   { key: "live", label: "실시간 순위", Page: Live },
+  { key: "market", label: "시장·공포지수", Page: Market },
+  { key: "performance", label: "AI 실전 성과", Page: Performance },
   { key: "research", label: "백테스트·연구", Page: Research },
+  { key: "guide", label: "API 연결 가이드", Page: Guide },
 ];
 
 // #탭 또는 #stock/종목코드
@@ -56,16 +63,24 @@ export default function App() {
 
   return (
     <ColorContext.Provider value={colors}>
-      <div className="app">
-        <header className="header">
-          <div>
-            <h1>Stock AI 대시보드</h1>
-            <p>차트·시장 지표로 351종목 순위를 예측하는 AI · BanKIS 모의투자대회 AI리그</p>
+      <PaperMatcher />
+      <Toaster />
+      <div className="bg-deco" aria-hidden="true" />
+      <header className="topbar">
+        <div className="topbar-in">
+          <a className="brand" href="#today" aria-label="Stock AI 처음 화면">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 8-10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span>Stock AI</span>
+          </a>
+          <StockSearch />
+          <div className="topbar-right">
+            <MarketClock />
+            <button className="icon-btn" onClick={() => setTheme(dark ? "light" : "dark")} aria-label="테마 바꾸기">
+              {dark ? "☀ 라이트" : "☾ 다크"}
+            </button>
           </div>
-          <button className="icon-btn" onClick={() => setTheme(dark ? "light" : "dark")}>
-            {dark ? "라이트 모드" : "다크 모드"}
-          </button>
-        </header>
+        </div>
+        <IndexTicker />
         <nav className="tabs" role="tablist">
           {TABS.map((t) => (
             <button key={t.key} role="tab" aria-selected={tab === t.key}
@@ -74,9 +89,14 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <main>{stockCode ? <Stock code={stockCode} /> : <Page />}</main>
-        <p className="foot">2026-2 인공지능서비스개발 II 팀 프로젝트 · 투자 권유가 아닌 연구용 화면이에요.</p>
+      </header>
+      <div className="app">
+        <main className="main">{stockCode ? <Stock code={stockCode} /> : <Page />}</main>
+        <WatchSide current={stockCode} />
       </div>
+      <p className="foot">
+        2026-2 인공지능서비스개발 II 팀 프로젝트 · 시세 출처 네이버 증권(지연될 수 있음) · 투자 권유가 아닌 연구·학습용 화면이에요.
+      </p>
     </ColorContext.Provider>
   );
 }

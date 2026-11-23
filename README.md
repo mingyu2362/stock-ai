@@ -39,11 +39,14 @@ npm install
 npm run dev                             # http://localhost:5173
 ```
 
-- 화면: 오늘의 추천·주문 / 계좌 현황 / 실전 성과 / 시장·공포지수 / 실시간 순위(네이버 증권) / 백테스트·연구, 종목 이름을 누르면 종목 상세(캔들 차트, `api/stock.js`)
+- 화면: AI 추천 / 모의투자 / 내 계좌 / 실시간 순위 / 시장·공포지수 / AI 실전 성과 / 백테스트·연구 / API 연결 가이드. 종목 이름을 누르면 종목 상세(캔들 차트 + 호가창 + 모의 주문)
+- 상단: 종목 검색, 장 상태 시계, 코스피·코스닥·코스피200 지수 티커. 넓은 화면 오른쪽: 관심종목(☆)·모의 보유 실시간 시세
 - 매일 `python model/daily.py` 가 마지막에 `export.py` 를 실행 → `dashboard/public/data` 를 커밋·푸시하면 Vercel 이 자동 배포
 - Vercel 설정: 저장소 연결 후 **Root Directory = `dashboard`** (빌드 명령·출력 폴더는 `vercel.json`)
-- 실시간 순위는 `dashboard/api/naver.js` 서버리스 함수가 네이버 증권에서 받아 전달 (공식 API 아님)
-- 계좌 현황은 사용자가 자기 한투 모의투자 앱 키를 입력해 자기 계좌만 조회 (키는 그 사람 브라우저에만 저장, `dashboard/api/account.js` 는 저장 없이 잔고 조회만 중계, 주문 기능 없음). Vercel 에 KIS 키를 넣을 필요 없음
+- 시세는 서버리스 함수가 네이버 증권에서 받아 전달 (공식 API 아님): `api/naver.js`(순위), `api/stock.js`(종목 상세·차트), `api/quote.js`(지수·다종목 현재가·호가)
+- **모의투자**(`src/paper.js`): API 키 없이 가상 자금(500만~1억)으로 실시간 시세에 매매. 시장가는 즉시, 지정가는 가격이 닿으면 체결(당일 유효). 수수료 0.015%, 매도세 0.20%. 기록은 사용자 브라우저 localStorage 에만 저장
+- **내 계좌**: 사용자가 자기 한투 앱 키로 **실전 또는 모의투자** 계좌를 골라 자기 계좌만 조회 (키는 그 사람 브라우저에만 저장, `dashboard/api/account.js` 는 저장 없이 잔고·주문내역 조회만 중계, 실전이어도 주문 기능 없음). Vercel 에 KIS 키를 넣을 필요 없음
+- **API 연결 가이드** 탭: 계좌 개설 → KIS Developers 앱 키 발급 → 연결까지 초보자용 단계별 안내와 자주 나는 오류
 - 실전 성과는 `data/trades/equity.csv`(date, equity), `data/trades/trades.csv`(date, code, side, shares, price) 가 있으면 표시
 
 ## 실전 매매 (trade/)
