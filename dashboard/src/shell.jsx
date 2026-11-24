@@ -1,6 +1,6 @@
 // 화면 틀: 지수 티커, 장 상태 시계, 관심종목 사이드바, 모의투자 미체결 확인기
 import { useEffect, useState } from "react";
-import { Change, dir, marketPhase, pct, useJson, usePolling, useQuotes, won } from "./lib.jsx";
+import { Change, dir, fmtPrice, marketPhase, pct, useJson, usePolling, useQuotes, won } from "./lib.jsx";
 import { matchOrders, recordValue, usePaper, valuation } from "./paper.js";
 import { Flash, Spark, StockAvatar, useSparks } from "./ui.jsx";
 import { toggleWatch, useWatch } from "./watch.js";
@@ -35,9 +35,10 @@ export function IndexTicker() {
   useEffect(() => { if (ready) recordValue(v.total); }, [ready, v?.total]);   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="ticker" aria-label="주요 지수">
-      {(data?.indices || [{ code: "KOSPI", name: "코스피" }, { code: "KOSDAQ", name: "코스닥" }, { code: "KPI200", name: "코스피 200" }])
+      {[...(data?.indices || [{ code: "KOSPI", name: "코스피" }, { code: "KOSDAQ", name: "코스닥" }, { code: "KPI200", name: "코스피 200" }]),
+        ...(data?.world || []).filter((x) => x.code !== ".IXIC")]
         .map((x) => (
-          <div className={`tick ${dir(x.change)}`} key={x.code}>
+          <div className={`tick ${dir(x.change)} ${x.code === "USDKRW" ? "tick-fx" : ""}`} key={x.code}>
             <span className="tick-name">{x.name}</span>
             <Flash value={x.price} className={`num tick-price ${dir(x.change)}`}>{x.price ? idx(x.price) : "–"}</Flash>
             {x.price ? (
@@ -108,7 +109,7 @@ export function WatchSide({ current }) {
                 <span className="w-name">{x.name}{x.rank && <span className="w-rank">AI {x.rank}위</span>}</span>
                 <Spark points={sparks[x.code]} base={q ? q.price - q.change : undefined} width={44} height={22} fill={false} />
                 <span className="w-price">
-                  <Flash value={q?.price} className={`num ${dir(q?.change)}`}><b>{q ? won(q.price) : "–"}</b></Flash>
+                  <Flash value={q?.price} className={`num ${dir(q?.change)}`}><b>{q ? fmtPrice(q.price, x.code) : "–"}</b></Flash>
                   {q && <Change ratio={q.ratio} change={q.change} arrowOnly />}
                 </span>
               </a>

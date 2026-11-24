@@ -44,7 +44,10 @@ npm run dev                             # http://localhost:5173
 - 매일 `python model/daily.py` 가 마지막에 `export.py` 를 실행 → `dashboard/public/data` 를 커밋·푸시하면 Vercel 이 자동 배포
 - Vercel 설정: 저장소 연결 후 **Root Directory = `dashboard`** (빌드 명령·출력 폴더는 `vercel.json`)
 - 시세는 서버리스 함수가 네이버 증권에서 받아 전달 (공식 API 아님): `api/naver.js`(순위), `api/stock.js`(종목 상세·차트), `api/quote.js`(지수·다종목 현재가·호가)
-- **모의투자**(`src/paper.js`): API 키 없이 가상 자금(500만~1억)으로 실시간 시세에 매매. 시장가는 즉시, 지정가는 가격이 닿으면 체결(당일 유효). 수수료 0.015%, 매도세 0.20%. 기록은 사용자 브라우저 localStorage 에만 저장
+- **모의투자**(`src/paper.js`): API 키 없이 가상 자금으로 실시간 시세에 매매. 시장가는 즉시, 지정가는 가격이 닿으면 체결(당일 유효). 수수료 0.015%, 매도세 0.20%. 기록은 사용자 브라우저 localStorage 에만 저장
+  - **나스닥100** 종목도 매매 (코드는 네이버 로이터 코드 `AAPL.O`, 검색창에 `AAPL`·`애플`). 가격은 달러, 계좌 현금은 원화 하나로 체결 순간 환율로 환전, 수수료 0.25%·거래세 없음, 손익은 원화(환율 효과 포함). 해외는 호가·분봉 없음
+  - **일괄 매도**: 보유 종목 표에서 체크한 종목(없으면 전체)을 지금 시세로 시장가 전량 매도. 그 종목의 미체결 매도 주문은 먼저 취소
+- **백테스트·연구** 탭: 전략 비교(국내·나스닥, 안정형·공격형·추가 전략) / 직접 백테스트(브라우저에서 값을 바꿔 바로 실행, `src/backtest.js` 는 `model/backtest.py` 와 같은 결과) / 모델 연구
 - **내 계좌**: 사용자가 자기 한투 앱 키로 **실전 또는 모의투자** 계좌를 골라 자기 계좌만 조회 (키는 그 사람 브라우저에만 저장, `dashboard/api/account.js` 는 저장 없이 잔고·주문내역 조회만 중계, 실전이어도 주문 기능 없음). Vercel 에 KIS 키를 넣을 필요 없음
 - **API 연결 가이드** 탭: 계좌 개설 → KIS Developers 앱 키 발급 → 연결까지 초보자용 단계별 안내와 자주 나는 오류
 - 실전 성과는 `data/trades/equity.csv`(date, equity), `data/trades/trades.csv`(date, code, side, shares, price) 가 있으면 표시
@@ -80,6 +83,38 @@ npm run dev                             # http://localhost:5173
 - 장중 감시: `python -m trade.monitor --live` (`.github/workflows/monitor.yml`, 09:00~15:20 1분마다). 외부 예약이 장 시작 무렵 `workflow_dispatch` 로 실행 (방법은 monitor.yml 맨 위)
 - 버튼용 환경 변수 (Vercel, 개발 중에는 `dashboard/.env.local`): `GITHUB_TOKEN` (이 저장소 Contents 읽기·쓰기만 준 fine-grained 토큰), `MODE_PASSWORD` (팀 비밀번호)
 
+### 실전 계좌로 바꾸기 (이번 학기는 모의투자 그대로)
+
+`trade/kis_api.py` 는 `KIS_ENV` 로 서버를 고른다. 기본 `paper`(모의투자). 실전은 세 가지가 모두 있어야 주문이 나간다.
+
+| 단계 | 어디에 | 값 |
+|---|---|---|
+| 1. 실전 키 | Secrets (PC 는 `.env`) | `KIS_REAL_APP_KEY`, `KIS_REAL_APP_SECRET`, `KIS_REAL_ACCOUNT` (모의 키와 별개) |
+| 2. 서버 전환 | Variables | `KIS_ENV = real` |
+| 3. 주문 허용 | Variables | `KIS_REAL_ORDER = yes` (없으면 실전 서버에서 조회만 하고 주문은 거부) |
+
+- 실전 매수 1건은 `config.REAL_MAX_ORDER_KRW`(기본 300만 원)를 넘지 못한다 (공격형 전액 매수도 이 한도로 잘림). 매도·손절은 제한 없음
+- 실전 TR: 잔고 `TTTC8434R`, 주문가능 `TTTC8908R`, 체결 `TTTC0081R`, 매수/매도 `TTTC0012U`/`TTTC0011U`, 취소 `TTTC0013U`. 토큰은 `token_kis_real.json` 에 따로 저장
+- 거래 기록(`data/trades/`)은 서버와 상관없이 같은 파일에 이어 쓴다 → 실전으로 바꾸는 날 기존 기록을 다른 폴더로 옮겨 두는 것을 권장
+- **아직 실제 실전 키로 시험하지 않았다.** 처음엔 `KIS_REAL_ORDER` 없이 `python -m trade.run_daily --test` 로 잔고 조회부터 확인
+
+## 나스닥100 AI 예측 (참고용)
+
+| 명령 | 하는 일 |
+|---|---|
+| `python collect/price_us.py [--universe]` | 구성종목(네이버) → `data/universe_us.csv`, 일봉(야후) → `data/raw/price_us/` |
+| `python features/market_us.py` · `python features/chart.py --market us` | 시장 피처(나스닥100 지수·VIX), 차트 피처 |
+| `python model/train.py --market us [--final]` | 월별 롤링 검증 → `us_model_A.csv` / 실전 모델 → `data/models/us_model_A*` |
+| `python model/predict.py --market us` | 순위 → `data/predictions/us_rank_날짜.csv` → 대시보드 `today_us.json` |
+
+- `model/daily.py` 가 국내 예측 뒤에 자동으로 돌린다. 실패해도 국내 주문은 그대로 진행. 팀 자동매매는 국내만
+- 모델 A(차트+시장)만. 검증 순위상관(IC) 2025 +0.03, 2026 약 0 → 국내 모델보다 약함
+
+## 백테스트
+
+- `python model/backtest.py` (국내: 기존 조합 표 + 전략 비교), `--market us` (나스닥), `--aggr-grid` (공격형 손절·추적 익절 민감도)
+- 대시보드 데이터: `python dashboard/export.py --backtest` → `backtest.json`(전략 비교 포함), `backtest_data_kr.json`·`backtest_data_us.json`(브라우저 백테스트용)
+
 ## 키 관리 규칙
 
 - 키는 `.env` 에만 저장하고 **절대 커밋하지 않는다**
@@ -93,7 +128,8 @@ npm run dev                             # http://localhost:5173
 | 주가 | FinanceDataReader, pykrx |
 | 뉴스 | Google News RSS (하루 단위 날짜 지정) |
 | 공시 | OpenDART |
-| 매매 | 한국투자증권 Open API (모의투자) |
+| 매매 | 한국투자증권 Open API (모의투자, 실전 전환 가능) |
+| 나스닥100 | 구성종목·실시간 시세·환율: 네이버 증권, 일봉: FinanceDataReader(야후) |
 
 ## 일정
 

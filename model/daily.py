@@ -9,7 +9,11 @@
 4. features/market_fear.py → features/market.py → features/chart.py
 5. (--retrain) model/train.py --final   실전 모델 다시 학습 (주 1회 정도면 충분)
 6. model/predict.py        순위·주문 목록 → data/predictions/
-7. dashboard/export.py     대시보드 JSON → dashboard/public/data/ (커밋·푸시하면 Vercel 이 다시 배포)
+7. 나스닥100 (대시보드 추천용, 실패해도 국내 매매는 그대로 진행)
+   collect/price_us.py → features/market_us.py → features/chart.py --market us
+   → (--retrain) model/train.py --market us --final → model/predict.py --market us
+   한국 아침에는 전날 미국 장이 끝나 있어서 그 종가로 다음 미국 거래일을 예측한다
+8. dashboard/export.py     대시보드 JSON → dashboard/public/data/ (커밋·푸시하면 Vercel 이 다시 배포)
 
 실행: python model/daily.py [--retrain] [--cash 금액] [--holdings 파일]   (프로젝트 루트에서)
 """
@@ -31,6 +35,11 @@ STEPS = [
     ["features/market_fear.py"],
     ["features/market.py"],
     ["features/chart.py"],
+]
+US_STEPS = [
+    ["collect/price_us.py"],
+    ["features/market_us.py"],
+    ["features/chart.py", "--market", "us"],
 ]
 
 
@@ -64,6 +73,14 @@ def main():
     if args.holdings:
         predict += ["--holdings", args.holdings]
     run(predict)
+    try:   # 나스닥100 은 대시보드 참고용 → 실패해도 국내 주문 흐름을 막지 않는다
+        for step in US_STEPS:
+            run(step)
+        if args.retrain:
+            run(["model/train.py", "--market", "us", "--final"])
+        run(["model/predict.py", "--market", "us"])
+    except SystemExit as e:
+        print(f"나스닥100 예측 건너뜀 (국내 매매에는 영향 없음): {e}", flush=True)
     run(["dashboard/export.py"])
 
 

@@ -44,12 +44,33 @@ AGGR_STOP_LOSS = 0.12        # 매수가 -12% 아래면 손절
 AGGR_BREAKEVEN_AT = 0.10     # 고점이 매수가 +10% 에 닿으면 손절선을 추적 손절로 올림 (본전 이상)
 AGGR_TRAIL = 0.08            # 그 뒤 고점 -8% 아래면 매도 (추적 익절)
 
+# 시장별 데이터 위치 (나스닥100 은 국내와 같은 흐름을 파일만 바꿔 쓴다)
+# - kr: 코스피200·코스닥150 (대회 종목)
+# - us: 나스닥100. 코드는 네이버 로이터 코드(AAPL.O), 시세 파일은 티커(AAPL.csv). 뉴스·공시 피처 없음 → 모델 A(차트+시장)만
+MARKETS = {
+    "kr": {"universe": "data/universe.csv", "price_dir": "data/raw/price", "index": "KOSPI",
+           "chart": "chart_features.csv", "market": "market_features.csv", "prefix": ""},
+    "us": {"universe": "data/universe_us.csv", "price_dir": "data/raw/price_us", "index": "NDX",
+           "chart": "chart_features_us.csv", "market": "market_features_us.csv", "prefix": "us_"},
+}
+US_MODEL = "A"
+US_TOP_N = 3                 # 나스닥 추천·백테스트 기본값 (국내와 같은 순위 전략)
+US_SELL_RANK = 12
+US_MIN_VALUE_USD = 50e6      # 20일 평균 거래대금(달러)이 이보다 작으면 매수 제외 (나스닥100 은 거의 다 통과)
+US_COMMISSION = 0.0025       # 해외주식 온라인 수수료 (매수·매도 각각, 대시보드 모의투자와 같음)
+US_SELL_TAX = 0.0            # 미국은 거래세 없음 (SEC 수수료는 아주 작아 무시)
+
 # 대회 거래 비용 (BanKIS 모의투자: 수수료 양방향 0.0140527%, 매도 시 세금 0.20%)
 COMMISSION = 0.000140527
 SELL_TAX = 0.002
 
 # 안전장치: True면 실제 주문 없이 출력만
 DRY_RUN = True
+
+# 한투 서버: "paper"(모의투자) / "real"(실전). 환경변수 KIS_ENV 가 있으면 그것을 따른다 (trade/kis_api.py)
+# 이번 학기는 모의투자로 진행 → paper 고정. 실전은 KIS_REAL_* 키와 KIS_REAL_ORDER=yes 가 모두 있어야 주문한다
+KIS_ENV = "paper"
+REAL_MAX_ORDER_KRW = 3_000_000   # 실전 매수 1건 최대 금액 (모의의 MAX_ORDER_KRW 와 별도, 처음엔 작게)
 
 # 뉴스 수집
 NEWS_SLEEP_SEC = 2

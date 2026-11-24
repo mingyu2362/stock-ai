@@ -1,5 +1,6 @@
 // 종목 상세: 네이버 증권 시세·종목 정보·투자자 동향 중계 (Vercel 서버리스 함수, 개발 중에는 vite.config.js 가 같은 함수를 씀)
 // GET /api/stock?code=005930&interval=day|week|month|minute|minute5|minute10|minute30|minute60
+// GET /api/stock?code=AAPL.O&interval=day|week|month   나스닥 종목 (로이터 코드, 달러, 분봉 없음)
 // 공식 API가 아니라 응답 형식이 바뀌면 고쳐야 한다.
 
 // 받아 올 기간 (일봉 이상은 년, 분봉은 일). 네이버는 분봉을 최근 1주일 남짓만 준다.
@@ -7,6 +8,7 @@ const INTERVALS = { day: 3, week: 10, month: 20 };
 const MINUTES = new Set(["minute", "minute5", "minute10", "minute30", "minute60"]);
 const MINUTE_DAYS = 10;
 const HEADERS = { "User-Agent": "Mozilla/5.0" };
+const US_RE = /^[A-Z0-9-]{1,8}\.[A-Z]{1,2}$/;
 
 function send(res, status, body, cache) {
   res.statusCode = status;
@@ -24,10 +26,53 @@ async function getJson(url) {
   return r.json();
 }
 
+const dailyCandle = (c) => ({
+  time: `${c.localDate.slice(0, 4)}-${c.localDate.slice(4, 6)}-${c.localDate.slice(6, 8)}`,
+  open: c.openPrice, high: c.highPrice, low: c.lowPrice, close: c.closePrice,
+  volume: c.accumulatedTradingVolume,
+});
+
+// 나스닥 종목: 기본 정보 + 일·주·월봉 (네이버는 해외 분봉·투자자 동향을 주지 않음)
+async function usStock(res, code, interval) {
+  if (!(interval in INTERVALS)) return send(res, 400, { error: "해외 종목은 일봉·주봉·월봉만 볼 수 있어요." });
+  const end = new Date(Date.now() + 9 * 3600_000);
+  const start = new Date(end);
+  start.setFullYear(start.getFullYear() - INTERVALS[interval]);
+  const [basic, chart] = await Promise.all([
+    getJson(`https://api.stock.naver.com/stock/${code}/basic`),
+    getJson(`https://api.stock.naver.com/chart/foreign/item/${code}/${interval}`
+      + `?startDateTime=${ymd(start)}0000&endDateTime=${ymd(end)}2359`),
+  ]);
+  return send(res, 200, {
+    code,
+    name: basic.stockName,
+    nameEng: basic.stockNameEng,
+    symbol: basic.symbolCode,
+    market: basic.stockExchangeType?.name === "NASDAQ" ? "나스닥" : basic.stockExchangeType?.nameKor,
+    cur: "USD",
+    price: num(basic.closePrice),
+    change: num(basic.compareToPreviousClosePrice),
+    ratio: num(basic.fluctuationsRatio),
+    open: basic.marketStatus === "OPEN",
+    tradedAt: basic.localTradedAt,
+    infos: (basic.stockItemTotalInfos || []).map((i) => ({ key: i.key, value: i.value, desc: i.keyDesc || i.valueDesc })),
+    deals: [],
+    interval,
+    candles: (Array.isArray(chart) ? chart : []).filter((c) => c.openPrice > 0).map(dailyCandle),
+  }, "s-maxage=30, stale-while-revalidate=60");
+}
+
 export default async function handler(req, res) {
   const params = new URL(req.url, "http://localhost").searchParams;
   const code = params.get("code") || "";
   const interval = params.get("interval") || "day";
+  if (US_RE.test(code)) {
+    try {
+      return await usStock(res, code, interval);
+    } catch (e) {
+      return send(res, 502, { error: `종목 정보를 가져오지 못했습니다: ${e.message}` });
+    }
+  }
   if (!/^[0-9A-Z]{6}$/.test(code) || !(interval in INTERVALS || MINUTES.has(interval))) {
     return send(res, 400, { error: "code(6자리) 또는 interval 값이 잘못됐습니다." });
   }
@@ -53,11 +98,7 @@ export default async function handler(req, res) {
           +c.localDateTime.slice(8, 10), +c.localDateTime.slice(10, 12)) / 1000,
         open: c.openPrice, high: c.highPrice, low: c.lowPrice, close: c.currentPrice,
         volume: c.accumulatedTradingVolume,
-      } : {
-        time: `${c.localDate.slice(0, 4)}-${c.localDate.slice(4, 6)}-${c.localDate.slice(6, 8)}`,
-        open: c.openPrice, high: c.highPrice, low: c.lowPrice, close: c.closePrice,
-        volume: c.accumulatedTradingVolume,
-      }));
+      } : dailyCandle(c)));
     send(res, 200, {
       code,
       name: basic.stockName,

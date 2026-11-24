@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Change, Loading, Pct, StockLink, Tile, dir, eok, marketLabel, pct, signed, useJson, usePolling, useQuotes, won,
+  Change, Loading, Pct, StockLink, Tile, dir, eok, marketLabel, pct, signed, usd, useJson, usePolling, useQuotes, won,
 } from "../lib.jsx";
 import { usePaper, valuation } from "../paper.js";
 import { useMode } from "../strategy.jsx";
@@ -172,6 +172,47 @@ function MyPaper() {
   );
 }
 
+// ---------- 나스닥100 AI 순위 (참고용, 팀 자동매매는 국내만) ----------
+function NasdaqPicks() {
+  const d = useJson("today_us.json").data;
+  const rows = d?.top?.slice(0, 10) || [];
+  const quotes = useQuotes(rows.map((r) => r.code), 20_000);
+  if (!d) return null;
+  return (
+    <div className="card section">
+      <h2>나스닥100 AI 순위 상위 10 <span className="badge us">참고용</span></h2>
+      <p className="sub">
+        {d.date} (뉴욕) 예측 · {d.base_close} 종가까지 반영 · 모델 {d.model}(차트+나스닥 지수·VIX), {d.trained_until}까지 학습.
+        국내 모델보다 검증 신호가 약해요 (<a href="#research">백테스트</a>). 가격은 달러, <a href="#paper">모의투자</a>에서 원화로 환전해 사고팔 수 있어요.
+      </p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>순위</th><th className="l">종목</th><th>현재가</th><th>오늘</th><th>점수</th><th>5일</th><th>20일</th><th>RSI</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const q = quotes[r.code];
+              return (
+                <tr key={r.code}>
+                  <td className="num">{r.rank}</td>
+                  <td className="l"><StockLink code={r.code} name={r.name} /> <span className="muted">{r.symbol}</span></td>
+                  <td className={`num ${dir(q?.change)}`}><Flash value={q?.price}>{usd(q?.price ?? r.last_close)}</Flash></td>
+                  <td>{q ? <Change ratio={q.ratio} change={q.change} arrowOnly /> : "–"}</td>
+                  <td className="num">{r.score.toFixed(4)}</td>
+                  <td><Pct v={r.ret_5d} ratio /></td>
+                  <td><Pct v={r.ret_20d} ratio /></td>
+                  <td className="num">{r.rsi_14?.toFixed(0) ?? "–"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function Today() {
   const state = useJson("today.json");
   const aggressive = useMode().data?.mode === "aggressive";
@@ -237,6 +278,8 @@ export default function Today() {
                 </table>
               </div>
             </div>
+
+            <NasdaqPicks />
 
             <div className="grid tiles">
               <Tile label="예측일" value={d.date} note={`${d.base_close} 종가까지 반영`} />

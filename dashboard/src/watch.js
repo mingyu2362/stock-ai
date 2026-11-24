@@ -1,5 +1,6 @@
 // 관심종목 (이 브라우저 localStorage 에만 저장). [{ code, name }]
 import { useSyncExternalStore } from "react";
+import { isStockCode } from "./lib.jsx";
 
 const KEY = "watchlist-v1";
 const MAX = 30;
@@ -7,7 +8,7 @@ const MAX = 30;
 function read() {
   try {
     const v = JSON.parse(localStorage.getItem(KEY));
-    if (Array.isArray(v)) return v.filter((x) => /^[0-9A-Z]{6}$/.test(x?.code));
+    if (Array.isArray(v)) return v.filter((x) => isStockCode(x?.code));
   } catch { /* 저장소를 못 쓰는 환경 */ }
   return [];
 }

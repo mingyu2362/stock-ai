@@ -44,6 +44,12 @@ jobs:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
+          # 실전 전환: Variables 에 KIS_ENV=real, Secrets 에 KIS_REAL_* 키, Variables 에 KIS_REAL_ORDER=yes (README 참고)
+          KIS_ENV: ${{ vars.KIS_ENV || 'paper' }}
+          KIS_REAL_APP_KEY: ${{ secrets.KIS_REAL_APP_KEY }}
+          KIS_REAL_APP_SECRET: ${{ secrets.KIS_REAL_APP_SECRET }}
+          KIS_REAL_ACCOUNT: ${{ secrets.KIS_REAL_ACCOUNT }}
+          KIS_REAL_ORDER: ${{ vars.KIS_REAL_ORDER }}
           PYTHONIOENCODING: utf-8
           LIVE: ${{ github.event.inputs.live == 'true' || vars.LIVE_TRADING == 'true' }}
         run: |

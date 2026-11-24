@@ -146,6 +146,7 @@ code { font-size: 0.92em; background: var(--surface-2); padding: 1px 5px; border
 .tick-name { color: var(--text-2); font-weight: 600; }
 .tick-paper { margin-left: auto; border: 1px solid var(--border); border-left: 3px solid var(--hero-2); background: linear-gradient(90deg, var(--accent-soft), transparent); }
 .tick-paper:hover { background: var(--surface-3); }
+@media (max-width: 1560px) { .tick-fx { display: none; } }   /* 좁으면 원/달러는 숨겨 내 모의투자 칸이 보이게 */
 .accent-text { color: var(--accent); }
 
 .tabs {
@@ -251,6 +252,25 @@ tr.row-link { cursor: pointer; }
 .badge.contest { background: var(--accent-soft); color: var(--accent); margin-left: 0; }
 .badge.real { background: var(--up-soft); color: var(--up); margin-left: 0; }
 .badge.blocked { background: var(--surface-2); color: var(--text-2); }
+.badge.us { background: var(--accent-soft); color: var(--accent); }
+
+/* 백테스트 화면 */
+.research-views { margin-bottom: 12px; }
+.bt-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; }
+.bt-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); font-weight: 600; }
+.bt-field small { font-weight: 400; font-size: 11px; }
+.bt-field select, .bt-field input:not([type="checkbox"]) {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border, transparent); border-radius: 8px;
+  padding: 7px 8px; font: inherit; font-weight: 500; min-width: 0;
+}
+.bt-check { flex-direction: row; align-items: center; align-self: end; padding-bottom: 8px; }
+.bt-h3 { font-size: 14px; margin: 0 0 6px; }
+
+/* 모의투자 일괄 매도 */
+.sellall-bar { justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+.btn-sellall { width: auto; padding: 8px 16px; font-size: 14px; border-radius: 10px; }
+.check-col { width: 28px; padding-right: 0 !important; }
+.check-col input { cursor: pointer; }
 
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .status .dot { width: 8px; height: 8px; border-radius: 50%; }

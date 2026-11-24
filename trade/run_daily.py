@@ -16,6 +16,8 @@
 - dashboard/export.py (대시보드 데이터 갱신)
 
 안전장치
+- 한투 서버는 KIS_ENV(기본 paper=모의투자). real(실전)은 KIS_REAL_* 키 + KIS_REAL_ORDER=yes 가 있어야 주문하고,
+  매수 1건은 config.REAL_MAX_ORDER_KRW 까지 (trade/kis_api.py)
 - --live 를 주지 않고 config.DRY_RUN=True 이면 주문하지 않고 "이렇게 주문하겠다"만 출력
 - 실제 주문은 GitHub Actions 에서만 (PC 에서는 --allow-local 을 붙여야 함, 같은 날 두 번 주문 방지)
 - 같은 날 매수까지 끝낸 기록(data/trades/log_{날짜}.json)이 있으면 다시 주문하지 않음
@@ -41,7 +43,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import config  # noqa: E402
 from trade import aggressive  # noqa: E402
-from trade.kis_api import Kis, KisError, round_up_tick  # noqa: E402
+from trade.kis_api import Kis, KisError, real_orders_allowed, round_up_tick  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 TRADE_DIR = os.path.join(ROOT, "data", "trades")
@@ -118,6 +120,8 @@ def buy_all(kis, buys, live, daylog, cap=config.MAX_ORDER_KRW):
     """매수 목록을 현재가 +1% 지정가로 산다. 주문가능현금을 종목 수로 나눠 금액을 맞춘다.
     cap: 종목당 최대 금액 (공격형은 None = 전액)"""
     cap = cap or float("inf")
+    if kis.is_real:   # 실전은 공격형(전액)이어도 1건 한도를 넘지 않게
+        cap = min(cap, config.REAL_MAX_ORDER_KRW)
     ordered = {b["code"] for b in daylog.data["buys"]}   # 중간에 멈췄다 다시 실행해도 같은 종목을 또 사지 않게
     buys = buys[~buys["code"].isin(ordered)]
     if ordered:
@@ -199,6 +203,9 @@ def morning(args):
     log(f"{'실전 주문' if live else 'DRY RUN (주문 안 함)'}{' [시험]' if args.test else ''} | {tag}")
 
     kis = Kis()
+    log(f"한투 서버: {kis.server_name}")
+    if live and kis.is_real and not real_orders_allowed():
+        raise SystemExit("실전 서버인데 KIS_REAL_ORDER=yes 가 없어 주문하지 않고 종료 (조회만 하려면 --live 없이 실행)")
     bal = kis.balance()
     save_holdings(bal["holdings"])
     if "start_holdings" not in daylog.data and not args.test:   # 장 마감 후 체결 추정용 (다시 실행해도 처음 잔고 유지)

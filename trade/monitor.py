@@ -14,7 +14,7 @@ import os
 import time
 
 from trade import aggressive
-from trade.kis_api import Kis, KisError
+from trade.kis_api import Kis, KisError, real_orders_allowed
 from trade.run_daily import DayLog, log, now, wait_until
 
 OPEN = (9, 0, 5)
@@ -82,12 +82,14 @@ def main():
         return log("공격형 보유 종목이 없어요 (다음 날 아침 매수)")
 
     kis = Kis()
+    if args.live and kis.is_real and not real_orders_allowed():
+        raise SystemExit("실전 서버인데 KIS_REAL_ORDER=yes 가 없어 감시(손절 주문)를 하지 않아요")
     pos = aggressive.held_position(state, kis.balance()["holdings"])
     if not pos:
         state["position"] = None
         aggressive.save_state(state)
         return log("공격형 기록 종목이 잔고에 없어 기록을 지우고 종료")
-    log(f"{'실전' if args.live else 'DRY RUN'} 감시 시작: {pos['name']} {pos['shares']}주, 매수가 {pos['entry']:,.0f}, "
+    log(f"[{kis.server_name}] {'실제 주문' if args.live else 'DRY RUN'} 감시 시작: {pos['name']} {pos['shares']}주, 매수가 {pos['entry']:,.0f}, "
         f"고점 {pos['peak']:,.0f}, 손절선 {aggressive.stop_price(pos)[0]:,}원")
     wait_until(OPEN)
 

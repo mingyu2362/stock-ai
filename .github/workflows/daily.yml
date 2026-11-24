@@ -77,12 +77,19 @@ jobs:
         run: |
           python features/market.py
           python features/chart.py
+          python features/chart.py --market us || echo "나스닥 피처 건너뜀 (대시보드 지표 칸만 비게 됨)"
       - name: 실행
         if: env.STEP != 'skip'
         env:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
+          # 실전 전환: Variables 에 KIS_ENV=real, Secrets 에 KIS_REAL_* 키, Variables 에 KIS_REAL_ORDER=yes (README 참고)
+          KIS_ENV: ${{ vars.KIS_ENV || 'paper' }}
+          KIS_REAL_APP_KEY: ${{ secrets.KIS_REAL_APP_KEY }}
+          KIS_REAL_APP_SECRET: ${{ secrets.KIS_REAL_APP_SECRET }}
+          KIS_REAL_ACCOUNT: ${{ secrets.KIS_REAL_ACCOUNT }}
+          KIS_REAL_ORDER: ${{ vars.KIS_REAL_ORDER }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           KRX_ID: ${{ secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_PW }}

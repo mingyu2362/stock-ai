@@ -1,12 +1,35 @@
 // 종목 화면 오른쪽: 호가창 + 모의투자 주문 (가상 자금, src/paper.js)
 import { useEffect, useState } from "react";
-import { pct, roundTick, tickSize, usePolling, won } from "./lib.jsx";
+import { fmtPrice, isUS, onTick, pct, roundTick, tickSize, usePolling, useQuotes, usd, won } from "./lib.jsx";
 import {
-  buyCost, maxBuyShares, orderableCash, placeOrder, sellableShares, sellProceeds, startPaper, START_OPTIONS, usePaper,
+  buyCost, FEE, FEE_US, maxBuyShares, orderableCash, placeOrder, sellableShares, sellProceeds, startPaper, START_OPTIONS,
+  TAX, usePaper,
 } from "./paper.js";
+
+// 나스닥 종목: 네이버가 호가를 주지 않아 대신 환율·거래 시간 안내
+export function UsInfo({ code }) {
+  const fx = useQuotes([code], 30_000)[code]?.fx;
+  return (
+    <div className="card orderbook">
+      <div className="panel-head"><h2>해외 주식 안내</h2></div>
+      <dl className="order-sum">
+        <div><dt>원/달러 환율</dt><dd className="num">{fx ? `${fx.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원` : "–"}</dd></div>
+        <div><dt>정규장 (한국 시간)</dt><dd>23:30 ~ 06:00 <small className="muted">(서머타임 22:30 ~ 05:00)</small></dd></div>
+        <div><dt>가격 단위</dt><dd>0.01달러</dd></div>
+        <div><dt>수수료 · 세금</dt><dd>매수·매도 {(FEE_US * 100).toFixed(2)}% · 거래세 없음</dd></div>
+      </dl>
+      <p className="fine">해외 종목은 호가 잔량을 제공하지 않아요. 모의투자 현금은 원화 하나이고, 주문할 때 그 순간 환율로 바로 환전해요.</p>
+    </div>
+  );
+}
 
 // 호가창: 매도 5호가(위, 파랑) / 매수 5호가(아래, 빨강). 가격을 누르면 주문 가격으로
 export function OrderBook({ code, price, prevClose, onPick }) {
+  if (isUS(code)) return <UsInfo code={code} />;
+  return <KrOrderBook code={code} price={price} prevClose={prevClose} onPick={onPick} />;
+}
+
+function KrOrderBook({ code, price, prevClose, onPick }) {
   const { data, error } = usePolling(`/api/quote?asking=${code}`, 5_000);
   const a = data?.asking;
   const base = prevClose || a?.prevClose;
@@ -94,6 +117,9 @@ export function OrderPanel({ code, name, price, picked }) {
   const [limit, setLimit] = useState("");
   const [qty, setQty] = useState("");
   const [state, setState] = useState({ busy: false, msg: null, error: null, confirm: false });
+  const us = isUS(code);
+  const fx = useQuotes(us ? [code] : [], 15_000)[code]?.fx || (us ? 0 : 1);   // 나스닥: 원/달러 (화면 계산용, 체결은 주문 순간 환율)
+  const px = (v) => `${fmtPrice(v, code)}${us ? "" : "원"}`;
 
   // 호가창에서 가격을 고르면 지정가로
   useEffect(() => {
@@ -115,9 +141,9 @@ export function OrderPanel({ code, name, price, picked }) {
   const shares = Number(qty) || 0;
   const pos = paper.positions[code];
   const sellable = sellableShares(paper, code);
-  const maxBuy = maxBuyShares(paper, unit);
-  const cost = side === "buy" ? buyCost(unit, shares) : sellProceeds(unit, shares);
-  const limitBad = type === "limit" && unit > 0 && unit % tickSize(unit) !== 0;
+  const maxBuy = us && !fx ? 0 : maxBuyShares(paper, unit, code, fx);
+  const cost = side === "buy" ? buyCost(unit, shares, code, fx) : sellProceeds(unit, shares, code, fx);
+  const limitBad = type === "limit" && unit > 0 && !onTick(unit, code);
 
   const setPart = (p) => {
     const max = side === "buy" ? maxBuy : sellable;
@@ -126,6 +152,7 @@ export function OrderPanel({ code, name, price, picked }) {
   const step = (dir) => {
     const base = Number(limit) || price || 0;
     setType("limit");
+    if (us) { setLimit(Math.max(0.01, roundTick(base + dir * 0.01, code)).toFixed(2)); return; }
     setLimit(String(roundTick(base + dir * tickSize(base + (dir < 0 ? -1 : 0)))));
   };
 
@@ -136,8 +163,8 @@ export function OrderPanel({ code, name, price, picked }) {
       setState({
         busy: false, error: null, confirm: false,
         msg: r.status === "filled"
-          ? `${side === "buy" ? "매수" : "매도"} 체결 · ${won(shares)}주 @ ${won(r.price)}원`
-          : `지정가 ${won(r.price)}원 주문 접수 · 가격이 닿으면 체결돼요 (오늘만 유효)`,
+          ? `${side === "buy" ? "매수" : "매도"} 체결 · ${won(shares)}주 @ ${px(r.price)}`
+          : `지정가 ${px(r.price)} 주문 접수 · 가격이 닿으면 체결돼요 (오늘만 유효)`,
       });
       setQty("");
     } catch (e) {
@@ -154,22 +181,25 @@ export function OrderPanel({ code, name, price, picked }) {
 
       <div className="seg seg-full" role="group" aria-label="주문 유형">
         <button aria-pressed={type === "market"} onClick={() => setType("market")}>시장가</button>
-        <button aria-pressed={type === "limit"} onClick={() => { setType("limit"); if (!limit && price) setLimit(String(price)); }}>지정가</button>
+        <button aria-pressed={type === "limit"} onClick={() => { setType("limit"); if (!limit && price) setLimit(us ? Number(price).toFixed(2) : String(price)); }}>지정가</button>
       </div>
 
       <label className="field">
-        <span>가격</span>
+        <span>가격{us ? " ($)" : ""}</span>
         {type === "market" ? (
-          <div className="field-box muted">현재가 {won(price)}원으로 바로 체결</div>
+          <div className="field-box muted">현재가 {px(price)}으로 바로 체결</div>
         ) : (
           <div className="stepper">
             <button type="button" onClick={() => step(-1)} aria-label="한 호가 내리기">−</button>
-            <input inputMode="numeric" value={limit} onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))} aria-label="지정 가격" />
+            <input inputMode={us ? "decimal" : "numeric"} value={limit} aria-label="지정 가격"
+              onChange={(e) => setLimit(us ? e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") : e.target.value.replace(/\D/g, ""))} />
             <button type="button" onClick={() => step(1)} aria-label="한 호가 올리기">+</button>
           </div>
         )}
       </label>
-      {limitBad && <p className="error-text">호가 단위 {won(tickSize(unit))}원에 맞춰 주세요. (예: {won(roundTick(unit))})</p>}
+      {limitBad && (us
+        ? <p className="error-text">0.01달러(센트) 단위로 입력하세요. (예: {usd(roundTick(unit, code))})</p>
+        : <p className="error-text">호가 단위 {won(tickSize(unit))}원에 맞춰 주세요. (예: {won(roundTick(unit))})</p>)}
 
       <label className="field">
         <span>수량</span>
@@ -189,8 +219,10 @@ export function OrderPanel({ code, name, price, picked }) {
         {side === "buy"
           ? <div><dt>주문가능</dt><dd className="num">{won(orderableCash(paper))}원 · 최대 {won(maxBuy)}주</dd></div>
           : <div><dt>매도가능</dt><dd className="num">{won(sellable)}주</dd></div>}
-        {pos && <div><dt>보유 · 평단</dt><dd className="num">{won(pos.shares)}주 · {won(pos.avg)}원</dd></div>}
-        <div><dt>주문 금액</dt><dd className="num">{won(cost.amount)}원</dd></div>
+        {pos && <div><dt>보유 · 평단</dt><dd className="num">{won(pos.shares)}주 · {px(pos.avg)}</dd></div>}
+        {us && <div><dt>주문 금액 ($)</dt><dd className="num">{usd(unit * shares)}</dd></div>}
+        {us && <div><dt>환율</dt><dd className="num">{fx ? `${fx.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}원/$` : "불러오는 중…"}</dd></div>}
+        <div><dt>주문 금액{us ? " (원화)" : ""}</dt><dd className="num">{won(cost.amount)}원</dd></div>
         <div><dt>수수료{side === "sell" ? "·세금" : ""}</dt><dd className="num">{won(cost.fee + cost.tax)}원</dd></div>
         <div className="total"><dt>{side === "buy" ? "총 결제" : "받을 금액"}</dt><dd className="num">{won(cost.total)}원</dd></div>
       </dl>
@@ -200,19 +232,24 @@ export function OrderPanel({ code, name, price, picked }) {
 
       {state.confirm ? (
         <div className="confirm">
-          <p><b>{name}</b> {won(shares)}주를 {type === "market" ? "시장가" : `${won(unit)}원 지정가`}로 {side === "buy" ? "살까요" : "팔까요"}?</p>
+          <p><b>{name}</b> {won(shares)}주를 {type === "market" ? "시장가" : `${px(unit)} 지정가`}로 {side === "buy" ? "살까요" : "팔까요"}?</p>
           <div className="confirm-btns">
             <button className="icon-btn" onClick={() => setState((s) => ({ ...s, confirm: false }))}>취소</button>
             <button className={`btn-order ${side}`} onClick={submit} disabled={state.busy}>{state.busy ? "주문 중…" : "확인"}</button>
           </div>
         </div>
       ) : (
-        <button className={`btn-order ${side}`} disabled={!shares || !unit || limitBad || state.busy}
+        <button className={`btn-order ${side}`} disabled={!shares || !unit || limitBad || state.busy || (us && !fx)}
           onClick={() => setState((s) => ({ ...s, confirm: true, msg: null, error: null }))}>
           {side === "buy" ? "매수" : "매도"} {shares ? `${won(shares)}주` : ""}
         </button>
       )}
-      <p className="fine">가상 자금 모의투자예요. 실제 주문이 나가지 않아요. 수수료 0.015%, 매도세 0.20% 반영. <a href="#paper">내 모의투자 →</a></p>
+      <p className="fine">
+        가상 자금 모의투자예요. 실제 주문이 나가지 않아요.{" "}
+        {us ? `수수료 ${(FEE_US * 100).toFixed(2)}%, 원화로 바로 환전 (환전 수수료 없음).`
+          : `수수료 ${(FEE * 100).toFixed(3)}%, 매도세 ${(TAX * 100).toFixed(2)}% 반영.`}{" "}
+        <a href="#paper">내 모의투자 →</a>
+      </p>
     </div>
   );
 }

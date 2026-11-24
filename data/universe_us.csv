@@ -1,0 +1,102 @@
+﻿code,symbol,name,name_eng,market
+AAPL.O,AAPL,애플,Apple Inc.,NASDAQ100
+MSFT.O,MSFT,마이크로소프트,Microsoft Corporation,NASDAQ100
+NVDA.O,NVDA,엔비디아,NVIDIA Corporation,NASDAQ100
+AMZN.O,AMZN,아마존닷컴,Amazon.com Inc,NASDAQ100
+GOOGL.O,GOOGL,알파벳 Class A,Alphabet Inc. Class A,NASDAQ100
+SPCX.O,SPCX,스페이스X,Space Exploration Technologies Corp,NASDAQ100
+GOOG.O,GOOG,알파벳 Class C,Alphabet Inc. Class C,NASDAQ100
+META.O,META,메타,Meta Platforms  Inc.,NASDAQ100
+AVGO.O,AVGO,브로드컴,Broadcom Inc,NASDAQ100
+TSLA.O,TSLA,테슬라,Tesla Inc,NASDAQ100
+WMT.O,WMT,월마트,Walmart Inc.,NASDAQ100
+AMD.O,AMD,AMD(어드밴스드 마이크로 디바이시스),Advanced Micro Devices  Inc.,NASDAQ100
+MU.O,MU,마이크론 테크놀로지,Micron Technology  Inc.,NASDAQ100
+COST.O,COST,코스트코 홀세일,Costco Wholesale Corp,NASDAQ100
+ASML.O,ASML,ASML 홀딩 ADR,ASML Holding N.V. ADR,NASDAQ100
+CSCO.O,CSCO,시스코 시스템즈,Cisco Systems Inc,NASDAQ100
+PLTR.O,PLTR,팔란티어 테크놀로지스,Palantir Technologies Inc.,NASDAQ100
+PANW.O,PANW,팔로 알토 네트웍스,Palo Alto Networks  Inc.,NASDAQ100
+INTC.O,INTC,인텔,Intel Corp,NASDAQ100
+TXN.O,TXN,텍사스 인스트루먼트,Texas Instruments Incorporated,NASDAQ100
+AMAT.O,AMAT,어플라이드 머티어리얼즈,Applied Materials Inc,NASDAQ100
+AMGN.O,AMGN,암젠,Amgen Inc,NASDAQ100
+CRWD.O,CRWD,크라우드 스트라이크 홀딩스,CrowdStrike Holdings  Inc.,NASDAQ100
+NFLX.O,NFLX,넷플릭스,Netflix  Inc.,NASDAQ100
+LIN.O,LIN,린드,Linde PLC,NASDAQ100
+LRCX.O,LRCX,램 리서치,Lam Research Corporation,NASDAQ100
+GILD.O,GILD,길리어드 사이언시스,Gilead Sciences  Inc.,NASDAQ100
+PEP.O,PEP,펩시코,PepsiCo  Inc.,NASDAQ100
+TMUS.O,TMUS,T-모바일 US,T-Mobile US Inc,NASDAQ100
+ADI.O,ADI,애널로그 디바이시스,Analog Devices  Inc.,NASDAQ100
+KLAC.O,KLAC,KLA,KLA Corporation,NASDAQ100
+ARM.O,ARM,암 홀딩스 ADR,ARM Holdings PLC ADR,NASDAQ100
+QCOM.O,QCOM,퀄컴,QUALCOMM Incorporated,NASDAQ100
+SHOP.O,SHOP,쇼피파이,Shopify Inc.,NASDAQ100
+ISRG.O,ISRG,인튜이티브 서지컬,Intuitive Surgical  Inc.,NASDAQ100
+VRTX.O,VRTX,버텍스 파마슈티컬,Vertex Pharmaceuticals Incorporated,NASDAQ100
+PDD.O,PDD,핀둬둬 ADR,PDD Holdings Inc. ADR,NASDAQ100
+ADP.O,ADP,오토매틱 데이터 프로세싱,Automatic Data Processing Inc,NASDAQ100
+SBUX.O,SBUX,스타벅스,Starbucks Corp,NASDAQ100
+APP.O,APP,앱러빈,AppLovin Corporation,NASDAQ100
+BKNG.O,BKNG,부킹 홀딩스,Booking Holdings Inc.,NASDAQ100
+MRVL.O,MRVL,마벨 테크놀로지 그룹,Marvell Technology  Inc.,NASDAQ100
+STX.O,STX,씨게이트,Seagate Technology Holdings PLC,NASDAQ100
+MAR.O,MAR,메리어트 인터내셔널,Marriott International  Inc.,NASDAQ100
+ABNB.O,ABNB,에어비앤비,Airbnb  Inc.,NASDAQ100
+WDC.O,WDC,웨스턴 디지털,Western Digital Corp,NASDAQ100
+REGN.O,REGN,리제네론 파마슈티컬스,Regeneron Pharmaceuticals  Inc.,NASDAQ100
+SNDK.O,SNDK,샌디스크,SanDisk Corporation,NASDAQ100
+FTNT.O,FTNT,포티넷,Fortinet  Inc.,NASDAQ100
+CSX.O,CSX,CSX,CSX Corporation,NASDAQ100
+CMCSA.O,CMCSA,컴캐스트,Comcast Corporation,NASDAQ100
+CTAS.O,CTAS,신타스,Cintas Corporation,NASDAQ100
+MNST.O,MNST,몬스터 베버리지,Monster Beverage Corporation,NASDAQ100
+ADBE.O,ADBE,어도비,Adobe Inc,NASDAQ100
+MDLZ.O,MDLZ,몬덜리즈 인터내셔널,Mondelez International  Inc.,NASDAQ100
+CEG.O,CEG,콘스텔레이션 에너지,Constellation Energy Corp,NASDAQ100
+MRNA.O,MRNA,모더나,Moderna  Inc.,NASDAQ100
+CDNS.O,CDNS,케이던스 디자인 시스템즈,Cadence Design Systems  Inc.,NASDAQ100
+SNPS.O,SNPS,시놉시스,Synopsys  Inc.,NASDAQ100
+ORLY.O,ORLY,오레일리 오토모티브,O'Reilly Automotive  Inc.,NASDAQ100
+INTU.O,INTU,인튜이트,Intuit Inc.,NASDAQ100
+MELI.O,MELI,메르카도리브레,MercadoLibre  Inc.,NASDAQ100
+ROST.O,ROST,로스 스토어스,Ross Stores Inc,NASDAQ100
+AEP.O,AEP,아메리칸 일렉트릭 파워 컴퍼니,American Electric Power Company Inc,NASDAQ100
+HON.O,HON,허니웰 인터내셔널,Honeywell International Inc.,NASDAQ100
+DASH.O,DASH,도어대시,Doordash  Inc.,NASDAQ100
+NXPI.O,NXPI,NXP 세미콘덕터,NXP Semiconductors NV,NASDAQ100
+FAST.O,FAST,패스널,Fastenal Company,NASDAQ100
+DDOG.O,DDOG,데이터도그,Datadog Inc,NASDAQ100
+MPWR.O,MPWR,모놀리식 파워 시스템즈,Monolithic Power Systems Inc,NASDAQ100
+PCAR.O,PCAR,파카,Paccar Inc,NASDAQ100
+IDXX.O,IDXX,아이덱스 래보라토리스,IDEXX Laboratories  Inc.,NASDAQ100
+ADSK.O,ADSK,오토데스크,Autodesk  Inc.,NASDAQ100
+XEL.O,XEL,엑셀 에너지,Xcel Energy Inc,NASDAQ100
+CCEP.O,CCEP,코카-콜라 유로퍼시픽 파트너스,Coca-Cola Europacific Partners PLC,NASDAQ100
+KDP.O,KDP,큐리그 닥터 페퍼,Keurig Dr Pepper Inc,NASDAQ100
+FANG.O,FANG,다이아몬드백 에너지,Diamondback Energy  Inc.,NASDAQ100
+HONA.O,HONA,허니웰 에어로스페이스,Honeywell Aerospace Inc,NASDAQ100
+EXC.O,EXC,엑셀론,Exelon Corp,NASDAQ100
+ROP.O,ROP,로퍼 테크놀로지스,Roper Technologies  Inc.,NASDAQ100
+BKR.O,BKR,베이커 휴즈,Baker Hughes Company,NASDAQ100
+PYPL.O,PYPL,페이팔 홀딩스,PayPal Holdings  Inc.,NASDAQ100
+TRI.O,TRI,톰슨 로이터,Thomson Reuters Corp,NASDAQ100
+WDAY.O,WDAY,워크데이,Workday  Inc.,NASDAQ100
+FER.O,FER,페로비알,Ferrovial N.V.,NASDAQ100
+LITE.O,LITE,루멘텀 홀딩스,Lumentum Holdings Inc.,NASDAQ100
+PAYX.O,PAYX,페이첵스,Paychex  Inc.,NASDAQ100
+TTWO.O,TTWO,테이크-투 인터랙티브 소프트웨어,Take-Two Interactive Software  Inc.,NASDAQ100
+GEHC.O,GEHC,GE 헬스케어,GE HealthCare Technologies Inc.,NASDAQ100
+ODFL.O,ODFL,올드 도미니언 프라이트 라인,Old Dominion Freight Line  Inc.,NASDAQ100
+MSTR.O,MSTR,스트래티지,Strategy Inc,NASDAQ100
+TER.O,TER,테라다인,Teradyne  Inc.,NASDAQ100
+ALAB.O,ALAB,아스테라 랩스,Astera Labs  Inc.,NASDAQ100
+MCHP.O,MCHP,마이크로칩 테크놀러지,Microchip Technology Inc,NASDAQ100
+DXCM.O,DXCM,덱스컴,Dexcom Inc,NASDAQ100
+CPRT.O,CPRT,코파트,Copart Inc,NASDAQ100
+RKLB.O,RKLB,로켓 랩,Rocket Lab Corp,NASDAQ100
+NBIS.O,NBIS,네비우스 그룹,Nebius Group NV,NASDAQ100
+AXON.O,AXON,액손 엔터프라이스,Axon Enterprise  Inc.,NASDAQ100
+CRWV.O,CRWV,코어위브,CoreWeave  Inc.,NASDAQ100
+ALNY.O,ALNY,앨나일램 파마슈티컬스,Alnylam Pharmaceuticals  Inc.,NASDAQ100

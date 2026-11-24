@@ -1,9 +1,168 @@
+import { useState } from "react";
+import Backtester from "../backtester.jsx";
 import { LineChartBox } from "../chart.jsx";
 import { Loading, Pct, Tile, useJson } from "../lib.jsx";
 
 const MODEL_NAME = { A: "A (차트+시장)", C: "C (차트+뉴스+시장)" };
+const VIEWS = [["compare", "전략 비교"], ["try", "직접 백테스트"], ["research", "모델 연구"]];
+const VIEW_KEY = "research-view";
 
 export default function Research() {
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem(VIEW_KEY) || "compare"; } catch { return "compare"; }
+  });
+  const pick = (v) => {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* 무시 */ }
+  };
+  return (
+    <>
+      <div className="seg research-views" role="tablist" aria-label="백테스트 화면">
+        {VIEWS.map(([k, l]) => <button key={k} role="tab" aria-pressed={view === k} onClick={() => pick(k)}>{l}</button>)}
+      </div>
+      {view === "compare" && <StrategyCompare />}
+      {view === "try" && <Backtester />}
+      {view === "research" && <ModelResearch />}
+    </>
+  );
+}
+
+// 전략 비교 (dashboard/export.py strategies → backtest.json): 국내·나스닥, 연속 실행 결과
+function StrategyCompare() {
+  const state = useJson("backtest.json");
+  const [market, setMarket] = useState("kr");
+  const [picked, setPicked] = useState(["stable", "aggressive"]);
+  return (
+    <Loading state={state}>
+      {(all) => {
+        const st = all.strategies;
+        if (!st) return <div className="card empty">전략 비교 데이터가 아직 없어요 (python dashboard/export.py --backtest).</div>;
+        const d = st[market];
+        if (!d) return <div className="card empty">{market === "us" ? "나스닥100" : "국내"} 전략 비교 데이터가 없어요.</div>;
+        const series = [
+          ...picked.map((k) => ({ key: k, name: st.defs[k].label })),
+          { key: "index", name: d.index_name, short: market === "us" ? "나스닥100" : "코스피" },
+        ];
+        const toggle = (k) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p.slice(-1), k]));
+        const best = Math.max(...d.rows.map((r) => r.total));
+        return (
+          <>
+            <div className="card section">
+              <div className="filters" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                <h2 style={{ margin: 0 }}>전략별 자산 (시작 = 100)</h2>
+                <div className="seg" role="group" aria-label="시장">
+                  {[["kr", "국내 351종목"], ["us", "나스닥100"]].map(([k, l]) => (
+                    <button key={k} aria-pressed={market === k} onClick={() => setMarket(k)}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <p className="sub">
+                {d.from} ~ {d.to}, 모델 {d.model} 월별 재학습 예측(모두 처음 보는 기간)으로 같은 엔진·같은 비용을 써서 돌린 결과예요.
+                아래 표에서 전략 이름을 눌러 그래프에 넣고 빼세요 (최대 2개 + 지수).
+              </p>
+              <LineChartBox data={d.curve} height={320} series={series} format={(v) => v.toFixed(0)}
+                shade={market === "kr" ? { from: "2026-10-12", to: d.to, label: "대회" } : undefined} />
+            </div>
+
+            <div className="card section">
+              <h2>전략 비교표</h2>
+              <p className="sub">기간별 수익률은 처음부터 이어서 돌린 자산 곡선에서 그 기간만 잘라 본 값이에요.</p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="l">전략</th>{st.periods.map((p) => <th key={p}>{p}</th>)}
+                      <th>전체</th><th>MDD</th><th>샤프</th><th>매도</th><th>승률</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.rows.map((r) => (
+                      <tr key={r.key} style={r.total === best ? { fontWeight: 600 } : undefined}>
+                        <td className="l">
+                          <button type="button" className={`chip ${picked.includes(r.key) ? "on" : ""}`} onClick={() => toggle(r.key)}
+                            title={st.defs[r.key].desc}>
+                            {st.defs[r.key].label}
+                          </button>
+                        </td>
+                        {st.periods.map((p) => <td key={p}><Pct v={r[p]} /></td>)}
+                        <td><Pct v={r.total} /></td>
+                        <td className="num">{r.mdd?.toFixed(1)}%</td>
+                        <td className="num">{r.sharpe?.toFixed(2)}</td>
+                        <td className="num">{r.sells}</td>
+                        <td className="num">{r.win == null ? "–" : `${r.win.toFixed(0)}%`}</td>
+                      </tr>
+                    ))}
+                    {d.bench.map((b) => (
+                      <tr key={b.key}>
+                        <td className="l muted">{b.key === "index" ? d.index_name : d.equal_name}</td>
+                        {st.periods.map((p) => <td key={p}><Pct v={b[p]} /></td>)}
+                        <td><Pct v={b.total} /></td>
+                        <td className="num muted">{b.mdd?.toFixed(1)}%</td>
+                        <td colSpan={3} />
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ul className="findings" style={{ marginTop: 10 }}>
+                {Object.entries(st.defs).map(([k, s]) => <li key={k}><b>{s.label}</b> — {s.desc}</li>)}
+              </ul>
+            </div>
+
+            {market === "kr" && st.aggr_grid && <AggrGrid rows={st.aggr_grid} periods={st.periods} />}
+
+            <div className="card">
+              <h2>읽을 때 주의할 점</h2>
+              <ul className="findings">
+                <li><b>공격형은 운에 크게 흔들려요.</b> 1종목만 들고 있어서 손절·익절 값을 조금만 바꿔도 결과가 완전히 달라져요 (아래 민감도 표). 한 번의 좋은 결과를 실력으로 보면 안 돼요.</li>
+                <li><b>모멘텀(AI 없음)이 높게 나온 기간은 생존 편향을 의심하세요.</b> 지금 지수에 남아 있는 종목만으로 과거를 돌리면 많이 오른 종목을 미리 아는 셈이라 추세 추종이 특히 유리해져요.</li>
+                <li><b>나스닥100 모델은 신호가 약해요.</b> 월별 검증 순위상관(IC)이 2025년 +0.03, 2026년 0 근처라 국내 모델(차트+시장)보다 확실히 약해요. 참고용으로만 보세요.</li>
+                <li>모두 일봉으로 흉내 낸 결과예요. 장중 손절은 손절가에서 0.2% 불리하게 체결한다고 가정했어요.</li>
+              </ul>
+            </div>
+          </>
+        );
+      }}
+    </Loading>
+  );
+}
+
+// 공격형 손절·추적 익절 값 민감도 (국내)
+function AggrGrid({ rows, periods }) {
+  const stops = [...new Set(rows.map((r) => r.stop))];
+  const trails = [...new Set(rows.map((r) => r.trail))];
+  const cell = (s, t) => rows.find((r) => r.stop === s && r.trail === t);
+  return (
+    <div className="card section">
+      <h2>공격형 민감도: 손절 x 추적 익절 폭 (전체 기간 수익률)</h2>
+      <p className="sub">추적 익절은 고점이 매수가 +10%에 닿은 뒤부터. 실전 값은 손절 12%, 폭 8%예요. 칸에 마우스를 올리면 기간별 수익률이 보여요.</p>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th className="l">손절 \ 추적 폭</th>{trails.map((t) => <th key={t}>{Math.round(t * 100)}%</th>)}</tr></thead>
+          <tbody>
+            {stops.map((s) => (
+              <tr key={s}>
+                <td className="l">−{Math.round(s * 100)}%</td>
+                {trails.map((t) => {
+                  const c = cell(s, t);
+                  const live = Math.abs(s - 0.12) < 1e-9 && Math.abs(t - 0.08) < 1e-9;
+                  return (
+                    <td key={t} title={periods.map((p) => `${p}: ${c?.[p]?.toFixed(1)}%`).join("\n") + `\nMDD ${c?.mdd?.toFixed(1)}%`}
+                      style={live ? { fontWeight: 700, outline: "2px solid var(--accent)", outlineOffset: -2 } : undefined}>
+                      <Pct v={c?.total} />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ModelResearch() {
   const state = useJson("backtest.json");
   return (
     <Loading state={state}>

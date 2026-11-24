@@ -25,3 +25,4 @@ Thumbs.db
 
 # 매일 다시 만드는 대용량 피처 (66MB, features/chart.py)
 data/processed/chart_features.csv
+data/processed/chart_features_us.csv

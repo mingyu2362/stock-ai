@@ -1,6 +1,7 @@
 // 가벼운 시세 중계: 지수 · 여러 종목 현재가 · 호가 (Vercel 서버리스 함수, 개발 중에는 vite.config.js 가 같은 함수를 씀)
-// GET /api/quote?index=1                → { indices: [{ code, name, price, change, ratio, open }] }  코스피·코스닥·코스피200
-// GET /api/quote?codes=005930,000660    → { quotes: { 005930: { code, name, price, change, ratio, open, high, low, volume, value, open_ } } }  (최대 40종목)
+// GET /api/quote?index=1                → { indices: [...코스피·코스닥·코스피200], world: [...나스닥100·나스닥종합·원달러] }
+// GET /api/quote?codes=005930,AAPL.O    → { quotes: { 005930: { code, name, price, change, ratio, open, high, low, volume, value } }, fx }
+//   (최대 40종목). 나스닥 종목은 로이터 코드(AAPL.O)로 받고 가격은 달러, cur: "USD", fx(원/달러)를 함께 준다
 // GET /api/quote?asking=005930          → { asking: { prevClose, sell: [{price, qty, rate}], buy: [...], totalSell, totalBuy } }
 // GET /api/quote?spark=005930,KOSPI     → 마지막 거래일 10분봉 (미니 차트)
 // GET /api/quote?daily=KOSPI&from=YYYYMMDD → 지수 일봉 종가
@@ -8,6 +9,9 @@
 
 const HEADERS = { "User-Agent": "Mozilla/5.0" };
 const INDICES = ["KOSPI", "KOSDAQ", "KPI200"];
+const KR_RE = /^[0-9A-Z]{6}$/;
+const US_RE = /^[A-Z0-9-]{1,8}\.[A-Z]{1,2}$/;   // 네이버 해외주식 로이터 코드 (AAPL.O = 나스닥 애플)
+const isUS = (c) => US_RE.test(c);
 
 function send(res, status, body, cache) {
   res.statusCode = status;
@@ -25,7 +29,7 @@ async function getJson(url) {
 }
 
 const toQuote = (d) => ({
-  code: d.itemCode,
+  code: d.itemCode || d.reutersCode,
   name: d.stockName,
   price: num(d.closePrice),
   change: num(d.compareToPreviousClosePrice),
@@ -46,9 +50,34 @@ const chartUrl = (code, interval, from, to) => {
   return `https://api.stock.naver.com/chart/domestic/${kind}/${code}/${interval}?startDateTime=${from}0000&endDateTime=${to}2359`;
 };
 
+// 원/달러 환율 (하나은행 고시, 네이버). 1분 캐시
+let fxCache = { at: 0, value: 0 };
+async function usdkrw() {
+  if (Date.now() - fxCache.at < 60_000 && fxCache.value) return fxCache;
+  const d = await getJson("https://api.stock.naver.com/marketindex/exchange/FX_USDKRW");
+  const x = d.exchangeInfo || {};
+  fxCache = { at: Date.now(), value: num(x.closePrice), change: num(x.fluctuations), ratio: num(x.fluctuationsRatio) };
+  return fxCache;
+}
+
+async function usQuotes(codes) {
+  if (!codes.length) return {};
+  const [d, fx] = await Promise.all([
+    getJson(`https://polling.finance.naver.com/api/realtime/worldstock/stock/${codes.join(",")}`), usdkrw(),
+  ]);
+  return Object.fromEntries((d.datas || []).map((x) => [x.reutersCode, { ...toQuote(x), cur: "USD", fx: fx.value }]));
+}
+
 // 마지막 거래일 10분봉 종가 (미니 차트용). 주말·휴일이면 직전 거래일
+// 해외 종목은 네이버가 분봉을 주지 않아 최근 30거래일 종가
 async function spark(code) {
   const end = kstNow();
+  if (isUS(code)) {
+    const start = new Date(end);
+    start.setDate(start.getDate() - 50);
+    const rows = await getJson(`https://api.stock.naver.com/chart/foreign/item/${code}/day?startDateTime=${ymd(start)}0000&endDateTime=${ymd(end)}2359`);
+    return (Array.isArray(rows) ? rows : []).slice(-30).map((r) => r.closePrice);
+  }
   const start = new Date(end);
   start.setDate(start.getDate() - 7);
   const rows = await getJson(chartUrl(code, "minute10", ymd(start), ymd(end)));
@@ -64,7 +93,7 @@ export default async function handler(req, res) {
     const sparkList = params.get("spark");
     if (sparkList) {
       const codes = [...new Set(sparkList.split(","))]
-        .filter((c) => /^[0-9A-Z]{6}$/.test(c) || INDICES.includes(c)).slice(0, 20);
+        .filter((c) => KR_RE.test(c) || isUS(c) || INDICES.includes(c)).slice(0, 20);
       const out = await Promise.all(codes.map((c) => spark(c).catch(() => [])));
       return send(res, 200, { sparks: Object.fromEntries(codes.map((c, i) => [c, out[i]])) },
         "s-maxage=60, stale-while-revalidate=120");
@@ -84,17 +113,27 @@ export default async function handler(req, res) {
     }
 
     if (params.get("index")) {
-      const d = await getJson(`https://polling.finance.naver.com/api/realtime/domestic/index/${INDICES.join(",")}`);
+      const [d, w, fx] = await Promise.all([
+        getJson(`https://polling.finance.naver.com/api/realtime/domestic/index/${INDICES.join(",")}`),
+        getJson("https://polling.finance.naver.com/api/realtime/worldstock/index/.NDX,.IXIC").catch(() => ({})),
+        usdkrw().catch(() => null),
+      ]);
       const indices = (d.datas || []).map((x) => ({
         code: x.itemCode, name: x.stockName, price: num(x.closePrice),
         change: num(x.compareToPreviousClosePrice), ratio: num(x.fluctuationsRatio), open: x.marketStatus === "OPEN",
       }));
-      return send(res, 200, { indices }, "s-maxage=15, stale-while-revalidate=30");
+      const world = (w.datas || []).map((x) => ({
+        code: x.reutersCode, name: x.indexName, price: num(x.closePrice),
+        change: num(x.compareToPreviousClosePrice), ratio: num(x.fluctuationsRatio), open: x.marketStatus === "OPEN",
+      }));
+      if (fx?.value) world.push({ code: "USDKRW", name: "원/달러", price: fx.value, change: fx.change, ratio: fx.ratio, open: true });
+      return send(res, 200, { indices, world }, "s-maxage=15, stale-while-revalidate=30");
     }
 
     const asking = params.get("asking");
     if (asking) {
-      if (!/^[0-9A-Z]{6}$/.test(asking)) return send(res, 400, { error: "종목코드(6자리)가 잘못됐습니다." });
+      if (isUS(asking)) return send(res, 400, { error: "해외 종목은 호가를 제공하지 않아요." });
+      if (!KR_RE.test(asking)) return send(res, 400, { error: "종목코드(6자리)가 잘못됐습니다." });
       const d = await getJson(`https://m.stock.naver.com/api/stock/${asking}/askingPrice`);
       const row = (r) => ({ price: num(r.price), qty: num(r.count), rate: Number(r.rate) || 0 });
       return send(res, 200, {
@@ -108,11 +147,17 @@ export default async function handler(req, res) {
       }, "s-maxage=5, stale-while-revalidate=10");
     }
 
-    const codes = [...new Set((params.get("codes") || "").split(","))].filter((c) => /^[0-9A-Z]{6}$/.test(c)).slice(0, 40);
-    if (!codes.length) return send(res, 400, { error: "codes(6자리 종목코드, 쉼표로 구분) 또는 index=1 이 필요합니다." });
-    const d = await getJson(`https://polling.finance.naver.com/api/realtime/domestic/stock/${codes.join(",")}`);
-    const quotes = Object.fromEntries((d.datas || []).map((x) => [x.itemCode, toQuote(x)]));
-    send(res, 200, { fetchedAt: new Date().toISOString(), quotes }, "s-maxage=10, stale-while-revalidate=20");
+    const codes = [...new Set((params.get("codes") || "").split(","))].filter((c) => KR_RE.test(c) || isUS(c)).slice(0, 40);
+    if (!codes.length) return send(res, 400, { error: "codes(6자리 종목코드 또는 AAPL.O 같은 해외 코드, 쉼표로 구분) 또는 index=1 이 필요합니다." });
+    const kr = codes.filter((c) => !isUS(c));
+    const us = codes.filter(isUS);
+    const [d, uq] = await Promise.all([
+      kr.length ? getJson(`https://polling.finance.naver.com/api/realtime/domestic/stock/${kr.join(",")}`) : {},
+      usQuotes(us),
+    ]);
+    const quotes = { ...Object.fromEntries((d.datas || []).map((x) => [x.itemCode, toQuote(x)])), ...uq };
+    const fx = us.length ? fxCache.value : undefined;
+    send(res, 200, { fetchedAt: new Date().toISOString(), quotes, fx }, "s-maxage=10, stale-while-revalidate=20");
   } catch (e) {
     send(res, 502, { error: `시세를 가져오지 못했습니다: ${e.message}` });
   }

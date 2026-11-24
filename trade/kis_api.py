@@ -1,10 +1,15 @@
-"""한국투자증권 Open API (모의투자)
+"""한국투자증권 Open API (모의투자 / 실전)
 
-- 토큰 발급 (하루 1회 발급 후 재사용, 1분 내 재요청 시 차단됨) → token_kis.json 에 저장 (.gitignore)
-- 잔고 조회, 주문가능금액, 현재가, 시장가 주문, 오늘 체결 조회
-- 모의투자 주소: https://openapivts.koreainvestment.com:29443
+- 서버는 환경변수 KIS_ENV 로 고른다: paper(기본, 모의투자) / real(실전)
+  - 모의: https://openapivts.koreainvestment.com:29443, 키 KIS_APP_KEY · KIS_APP_SECRET · KIS_ACCOUNT
+  - 실전: https://openapi.koreainvestment.com:9443,     키 KIS_REAL_APP_KEY · KIS_REAL_APP_SECRET · KIS_REAL_ACCOUNT
+    (실전·모의 앱 키가 서로 달라서 이름을 나눠 섞이지 않게 했다)
+- 실전 주문 안전장치: KIS_REAL_ORDER=yes 가 없으면 실전 서버에서 조회만 하고 주문·취소는 거부한다.
+  실전 주문 1건 금액은 config.REAL_MAX_ORDER_KRW 를 넘지 못한다
+- 토큰 발급 (하루 1회 발급 후 재사용, 1분 내 재요청 시 차단됨) → token_kis.json / token_kis_real.json (.gitignore)
+- 잔고 조회, 주문가능금액, 현재가, 시장가·지정가 주문, 취소, 오늘 체결 조회
 - 키는 환경변수(.env / GitHub Secrets)에서만 읽는다
-- 모의투자는 초당 호출 수 제한이 낮아(약 2회) 호출 사이에 간격을 둔다
+- 모의투자는 초당 호출 수 제한이 낮아(약 2회) 호출 사이에 간격을 둔다 (실전은 초당 약 20회)
 """
 
 import json
@@ -12,15 +17,45 @@ import os
 import time
 from datetime import datetime
 
+import sys
+
 import requests
 from dotenv import load_dotenv
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 load_dotenv(os.path.join(ROOT, ".env"))
+import config  # noqa: E402
 
-BASE = "https://openapivts.koreainvestment.com:29443"
-TOKEN_FILE = os.path.join(ROOT, "token_kis.json")
-CALL_GAP_SEC = 0.6
+# 서버별 설정. TR ID 는 실전이 T, 모의가 V 로 시작 (실전 주문·체결조회는 2024년 새 TR ID)
+SERVERS = {
+    "paper": {
+        "name": "모의투자", "base": "https://openapivts.koreainvestment.com:29443", "env_prefix": "KIS_",
+        "token_file": "token_kis.json", "gap": 0.6,
+        "tr": {"balance": "VTTC8434R", "psbl": "VTTC8908R", "ccld": "VTTC8001R",
+               "buy": "VTTC0802U", "sell": "VTTC0801U", "cancel": "VTTC0803U"},
+    },
+    "real": {
+        "name": "실전", "base": "https://openapi.koreainvestment.com:9443", "env_prefix": "KIS_REAL_",
+        "token_file": "token_kis_real.json", "gap": 0.07,
+        "tr": {"balance": "TTTC8434R", "psbl": "TTTC8908R", "ccld": "TTTC0081R",
+               "buy": "TTTC0012U", "sell": "TTTC0011U", "cancel": "TTTC0013U"},
+    },
+}
+
+
+def kis_env():
+    """지금 쓸 서버 (paper / real). 환경변수 KIS_ENV, 없으면 config.KIS_ENV."""
+    env = (os.environ.get("KIS_ENV") or config.KIS_ENV).strip().lower()
+    if env not in SERVERS:
+        raise ValueError(f"KIS_ENV 는 paper 또는 real 이어야 해요 (지금: {env})")
+    return env
+
+
+def real_orders_allowed():
+    return os.environ.get("KIS_REAL_ORDER", "").strip().lower() == "yes"
+
+
 RATE_LIMIT = ("EGW00201", "EGW00215")   # 초당 거래건수 초과 (모의투자는 주로 EGW00215)
 RETRIES = 6
 
@@ -30,13 +65,19 @@ class KisError(Exception):
 
 
 class Kis:
-    def __init__(self):
-        self.key = os.environ.get("KIS_APP_KEY")
-        self.secret = os.environ.get("KIS_APP_SECRET")
-        account = os.environ.get("KIS_ACCOUNT", "")
+    def __init__(self, env=None):
+        self.env = env or kis_env()
+        srv = SERVERS[self.env]
+        self.server_name, self.base, self.tr = srv["name"], srv["base"], srv["tr"]
+        self.gap = srv["gap"]
+        self.token_file = os.path.join(ROOT, srv["token_file"])
+        p = srv["env_prefix"]
+        self.key = os.environ.get(f"{p}APP_KEY")
+        self.secret = os.environ.get(f"{p}APP_SECRET")
+        account = os.environ.get(f"{p}ACCOUNT", "")
         digits = "".join(ch for ch in account if ch.isdigit())
         if not self.key or not self.secret or len(digits) < 8:
-            raise KisError("KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT 환경변수를 확인하세요 (.env)")
+            raise KisError(f"{self.server_name} 키: {p}APP_KEY, {p}APP_SECRET, {p}ACCOUNT 환경변수를 확인하세요 (.env)")
         self.cano, self.prdt = digits[:8], digits[8:10] or "01"
         self._token = None
         self._last_call = 0.0
@@ -45,13 +86,13 @@ class Kis:
     def token(self):
         if self._token and self._token["expires"] - time.time() > 600:
             return self._token["value"]
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, encoding="utf-8") as f:
+        if os.path.exists(self.token_file):
+            with open(self.token_file, encoding="utf-8") as f:
                 saved = json.load(f)
             if saved.get("key") == self.key[:8] and saved["expires"] - time.time() > 600:
                 self._token = saved
                 return saved["value"]
-        r = requests.post(f"{BASE}/oauth2/tokenP", json={
+        r = requests.post(f"{self.base}/oauth2/tokenP", json={
             "grant_type": "client_credentials", "appkey": self.key, "appsecret": self.secret}, timeout=10)
         body = r.json()
         if "access_token" not in body:
@@ -59,13 +100,13 @@ class Kis:
                            " (1분에 1번만 발급됨)")
         self._token = {"key": self.key[:8], "value": body["access_token"],
                        "expires": time.time() + int(body.get("expires_in", 86400))}
-        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+        with open(self.token_file, "w", encoding="utf-8") as f:
             json.dump(self._token, f)
         return self._token["value"]
 
     def _call(self, method, path, tr_id, params=None, body=None):
         for attempt in range(RETRIES):
-            wait = self._last_call + CALL_GAP_SEC - time.time()
+            wait = self._last_call + self.gap - time.time()
             if wait > 0:
                 time.sleep(wait)
             headers = {
@@ -73,7 +114,7 @@ class Kis:
                 "authorization": f"Bearer {self.token()}",
                 "appkey": self.key, "appsecret": self.secret, "tr_id": tr_id, "custtype": "P",
             }
-            r = requests.request(method, f"{BASE}{path}", headers=headers, params=params,
+            r = requests.request(method, f"{self.base}{path}", headers=headers, params=params,
                                  data=json.dumps(body) if body else None, timeout=10)
             self._last_call = time.time()
             data = r.json()
@@ -82,8 +123,8 @@ class Kis:
                 continue
             if data.get("msg_cd") == "EGW00123":      # 토큰 만료
                 self._token = None
-                if os.path.exists(TOKEN_FILE):
-                    os.remove(TOKEN_FILE)
+                if os.path.exists(self.token_file):
+                    os.remove(self.token_file)
                 continue
             return data
         return data
@@ -104,7 +145,7 @@ class Kis:
                   "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N",
                   "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         data = self._check(self._call("GET", "/uapi/domestic-stock/v1/trading/inquire-balance",
-                                      "VTTC8434R", params=params), "잔고 조회")
+                                      self.tr["balance"], params=params), "잔고 조회")
         holdings = {}
         for p in data.get("output1", []):
             shares = int(p["hldg_qty"])
@@ -123,7 +164,7 @@ class Kis:
         params = {**self._account(), "PDNO": code, "ORD_UNPR": "0", "ORD_DVSN": "01",
                   "CMA_EVLU_AMT_ICLD_YN": "N", "OVRS_ICLD_YN": "N"}
         data = self._check(self._call("GET", "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
-                                      "VTTC8908R", params=params), "주문가능금액 조회")
+                                      self.tr["psbl"], params=params), "주문가능금액 조회")
         return float(data["output"]["ord_psbl_cash"])
 
     def price(self, code):
@@ -145,7 +186,7 @@ class Kis:
                   "INQR_DVSN": "00", "PDNO": "", "CCLD_DVSN": "01", "ORD_GNO_BRNO": "", "ODNO": "",
                   "INQR_DVSN_3": "00", "INQR_DVSN_1": "", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         data = self._check(self._call("GET", "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
-                                      "VTTC8001R", params=params), "체결 조회")
+                                      self.tr["ccld"], params=params), "체결 조회")
         out = []
         for o in data.get("output1", []):
             qty = int(o.get("tot_ccld_qty") or 0)
@@ -164,7 +205,7 @@ class Kis:
                   "CCLD_DVSN": "01", "ORD_GNO_BRNO": "", "ODNO": "", "INQR_DVSN_3": "00", "INQR_DVSN_1": "",
                   "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         data = self._check(self._call("GET", "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
-                                      "VTTC8001R", params=params), f"{code} 체결 합계 조회")
+                                      self.tr["ccld"], params=params), f"{code} 체결 합계 조회")
         s = data.get("output2") or {}
         s = s[0] if isinstance(s, list) else s
         qty = int(float(s.get("tot_ccld_qty") or 0))
@@ -172,21 +213,39 @@ class Kis:
         return qty, (amt / qty if qty else 0.0)
 
     # ---------- 주문 ----------
+    @property
+    def is_real(self):
+        return self.env == "real"
+
+    def _guard_real(self, side=None, code=None, shares=0, price=None):
+        """실전 서버 주문 안전장치: KIS_REAL_ORDER=yes 가 있어야 하고, 매수 1건 금액은 config.REAL_MAX_ORDER_KRW 이하.
+        매도(손절 포함)는 금액 제한 없이 나가야 하므로 막지 않는다."""
+        if not self.is_real:
+            return
+        if not real_orders_allowed():
+            raise KisError("실전 서버 주문이 막혀 있어요. 정말 실전으로 주문하려면 KIS_REAL_ORDER=yes 를 설정하세요")
+        if side == "buy" and code and shares:
+            amount = shares * (price or self.price(code))
+            if amount > config.REAL_MAX_ORDER_KRW:
+                raise KisError(f"{code} 주문 금액 {amount:,.0f}원이 실전 1건 한도 "
+                               f"{config.REAL_MAX_ORDER_KRW:,.0f}원(config.REAL_MAX_ORDER_KRW)을 넘어요")
     def order(self, side, code, shares, price=None):
         """주문. price=None 이면 시장가, 아니면 지정가. (주문번호, 주문 기관번호)를 돌려준다.
         시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두므로, 여러 종목을 살 때는 지정가를 쓴다."""
         body = {**self._account(), "PDNO": code, "ORD_DVSN": "01" if price is None else "00",
                 "ORD_QTY": str(int(shares)), "ORD_UNPR": "0" if price is None else str(int(price))}
-        tr_id = {"buy": "VTTC0802U", "sell": "VTTC0801U"}[side]
+        self._guard_real(side, code, shares, price)
+        tr_id = self.tr[side]
         data = self._check(self._call("POST", "/uapi/domestic-stock/v1/trading/order-cash", tr_id,
                                       body=body), f"{code} {side} {shares}주 주문")
         return data["output"]["ODNO"], data["output"]["KRX_FWDG_ORD_ORGNO"]
 
     def cancel(self, order_no, org_no):
         """미체결 주문 전량 취소."""
+        self._guard_real()
         body = {**self._account(), "KRX_FWDG_ORD_ORGNO": org_no, "ORGN_ODNO": order_no, "ORD_DVSN": "00",
                 "RVSE_CNCL_DVSN_CD": "02", "ORD_QTY": "0", "ORD_UNPR": "0", "QTY_ALL_ORD_YN": "Y"}
-        self._check(self._call("POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", "VTTC0803U",
+        self._check(self._call("POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", self.tr["cancel"],
                                body=body), f"주문 {order_no} 취소")
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import CandleChart from "../candle.jsx";
-import { marketOpen, Pct, pct, useJson, won } from "../lib.jsx";
+import { fmtPrice, isUS, marketOpen, Pct, pct, useJson, usMarketOpen, won } from "../lib.jsx";
 import { OrderBook, OrderPanel } from "../order.jsx";
 import { usePaper } from "../paper.js";
 import { liveStop, useMode } from "../strategy.jsx";
@@ -18,9 +18,11 @@ const INTERVALS = [
   { key: "minute30", label: "30분" },
   { key: "minute60", label: "60분" },
 ];
+const US_INTERVALS = INTERVALS.slice(0, 3);   // 네이버가 해외 분봉을 주지 않음
 const REFRESH_MS = 30_000;
 
 const signed = (v) => `${v > 0 ? "+" : ""}${won(v)}`;
+const signedPrice = (v, code) => (isUS(code) ? `${v > 0 ? "+" : v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}` : `${signed(Math.round(v))}원`);
 const dirOf = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
 
 const SHOW_KEY = "chart-holding";   // 평단·손절선 표시 여부 (이 브라우저에만 기억)
@@ -76,10 +78,16 @@ function goBack() {
 }
 
 export default function Stock({ code }) {
-  const [interval, setInterval_] = useState("day");
+  const [intervalRaw, setInterval_] = useState("day");
+  const us = isUS(code);
+  const interval = us && !US_INTERVALS.some((t) => t.key === intervalRaw) ? "day" : intervalRaw;
   const [state, setState] = useState({ data: null, error: null, loading: true });
-  const today = useJson("today.json").data;
-  const universe = useJson("universe.json").data || {};
+  const todayKr = useJson("today.json").data;
+  const todayUs = useJson("today_us.json").data;
+  const today = us ? todayUs : todayKr;
+  const universeKr = useJson("universe.json").data || {};
+  const universeUs = useJson("universe_us.json").data || {};
+  const universe = us ? universeUs : universeKr;
   const mode = useMode().data;
   const acct = useAccountPosition(code);
   const paper = usePaper();
@@ -105,7 +113,7 @@ export default function Stock({ code }) {
         .catch((error) => alive && setState((s) => ({ ...s, error, loading: false })));
     };
     load();
-    const timer = setInterval(() => marketOpen() && load(), REFRESH_MS);
+    const timer = setInterval(() => (isUS(code) ? usMarketOpen() : marketOpen()) && load(), REFRESH_MS);
     return () => { alive = false; clearInterval(timer); };
   }, [code, interval]);
 
@@ -141,14 +149,15 @@ export default function Stock({ code }) {
                 {universe[d.code] && <span className="badge contest">AI 분석 종목</span>}
               </h2>
               <div className="stock-price">
-                <Flash value={d.price}><b className={dirOf(d.change)}>{won(d.price)}<small>원</small></b></Flash>
+                <Flash value={d.price}><b className={dirOf(d.change)}>{fmtPrice(d.price, d.code)}{!us && <small>원</small>}</b></Flash>
                 <span className={dirOf(d.change)}>
-                  {d.change > 0 ? "▲" : d.change < 0 ? "▼" : ""} {won(Math.abs(d.change))} ({pct(d.ratio, { digits: 2 })})
+                  {d.change > 0 ? "▲" : d.change < 0 ? "▼" : ""} {fmtPrice(Math.abs(d.change), d.code)} ({pct(d.ratio, { digits: 2 })})
                 </span>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-                <span className={`live-dot ${d.open ? "on" : ""}`} />{d.open ? "장중 실시간" : "장 마감"}{time ? ` · ${time} 기준` : ""} · 출처 네이버 증권
-                {holding && <> · <b className={dirOf(holding.pnl)}>{holding.src === "모의" ? "모의 보유" : holding.src === "계좌" ? "내 계좌 보유" : "팀 보유"} {won(holding.shares)}주 {signed(Math.round(holding.pnl))}원 ({pct(holding.ratio, { digits: 2 })})</b></>}
+                <span className={`live-dot ${d.open ? "on" : ""}`} />{d.open ? "장중 실시간" : "장 마감"}{time ? ` · ${us ? "뉴욕 " : ""}${time} 기준` : ""} · 출처 네이버 증권
+                {us && d.nameEng && <> · {d.nameEng}</>}
+                {holding && <> · <b className={dirOf(holding.pnl)}>{holding.src === "모의" ? "모의 보유" : holding.src === "계좌" ? "내 계좌 보유" : "팀 보유"} {won(holding.shares)}주 {signedPrice(holding.pnl, d.code)} ({pct(holding.ratio, { digits: 2 })})</b></>}
               </p>
             </div>
             <div className="ai-box">
@@ -162,7 +171,7 @@ export default function Stock({ code }) {
                   </div>
                 </>
               ) : (
-                <div className="note">AI 분석 대상(코스피200·코스닥150)이 아니라 AI 순위가 없어요</div>
+                <div className="note">AI 분석 대상({us ? "나스닥100" : "코스피200·코스닥150"})이 아니라 AI 순위가 없어요</div>
               )}
             </div>
           </div>
@@ -172,7 +181,7 @@ export default function Stock({ code }) {
               <div className="card section chart-card">
                 <div className="filters" style={{ marginBottom: 8 }}>
                   <div className="seg" role="group" aria-label="봉 주기">
-                    {INTERVALS.map((t) => (
+                    {(us ? US_INTERVALS : INTERVALS).map((t) => (
                       <button key={t.key} aria-pressed={interval === t.key} onClick={() => setInterval_(t.key)}>{t.label}</button>
                     ))}
                   </div>
@@ -181,14 +190,16 @@ export default function Stock({ code }) {
                       <input type="checkbox" checked={show} onChange={toggleShow} /> 평단{holding.stop ? "·손절선" : ""}
                     </label>
                   )}
-                  <span className="muted" style={{ fontSize: 12 }}>드래그로 이동 · 휠로 확대/축소{marketOpen() ? " · 30초마다 갱신" : ""}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    드래그로 이동 · 휠로 확대/축소{(us ? usMarketOpen() : marketOpen()) ? " · 30초마다 갱신" : ""}{us ? " · 해외 종목은 분봉 없음" : ""}
+                  </span>
                 </div>
                 {d.interval === interval && d.candles.length > 0
                   ? <CandleChart candles={d.candles} interval={interval} holding={show ? holding : null} />
                   : <div className="empty">{d.candles.length ? "불러오는 중…" : "시세 데이터가 없어요."}</div>}
               </div>
 
-              <div className="grid two">
+              <div className={d.deals.length ? "grid two" : ""}>
                 <div className="card">
                   <h2>종목 정보</h2>
                   <p className="sub">기준 시점이 있는 값은 괄호 안 날짜 기준이에요.</p>
@@ -202,7 +213,7 @@ export default function Stock({ code }) {
                   </dl>
                 </div>
 
-                <div className="card">
+                {d.deals.length > 0 && <div className="card">
                   <h2>투자자별 순매수 (주)</h2>
                   <p className="sub">최근 거래일 기준, 개인은 장 마감 후 확정돼요.</p>
                   <div className="table-wrap">
@@ -224,7 +235,7 @@ export default function Stock({ code }) {
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </div>}
               </div>
 
               {top && (

@@ -21,25 +21,32 @@
 - 고점 대비:   high_120_gap (종가 / 120일 최고가 - 1)
 상장 후 MIN_HISTORY 거래일 전은 값이 불안정해서 비워 둔다.
 
-실행: python features/chart.py   (프로젝트 루트에서)
+나스닥100 (--market us): data/universe_us.csv, data/raw/price_us/{티커}.csv, 나스닥100 지수(_index_NDX)
+      → data/processed/chart_features_us.csv  (code 는 로이터 코드 AAPL.O). 거래대금은 달러
+
+실행: python features/chart.py [--market us]   (프로젝트 루트에서, 기본 kr)
 """
 
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+import config  # noqa: E402
+
 UNIVERSE_FILE = os.path.join(ROOT, "data", "universe.csv")
 PRICE_DIR = os.path.join(ROOT, "data", "raw", "price")
 OUT_FILE = os.path.join(ROOT, "data", "processed", "chart_features.csv")
 
 MIN_HISTORY = 60  # 상장 직후 이 거래일 수 미만이면 피처를 비움
-INDEX_OF = {"KOSPI200": "KOSPI", "KOSDAQ150": "KOSDAQ"}
+INDEX_OF = {"KOSPI200": "KOSPI", "KOSDAQ150": "KOSDAQ", "NASDAQ100": "NDX"}
 
 
-def load_price(name):
-    return pd.read_csv(os.path.join(PRICE_DIR, f"{name}.csv"),
+def load_price(name, price_dir=PRICE_DIR):
+    return pd.read_csv(os.path.join(price_dir, f"{name}.csv"),
                        parse_dates=["Date"]).set_index("Date").sort_index()
 
 
@@ -96,23 +103,32 @@ def stock_features(p, index_close):
 
 
 def main():
-    universe = pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
-    index_close = {k: load_price(f"_index_{k}")["Close"] for k in set(INDEX_OF.values())}
-    next_day = pd.DatetimeIndex([index_close["KOSPI"].index.max() + pd.offsets.BDay(1)])
+    mk = sys.argv[sys.argv.index("--market") + 1] if "--market" in sys.argv else "kr"
+    m = config.MARKETS[mk]
+    price_dir = os.path.join(ROOT, m["price_dir"])
+    out_file = os.path.join(ROOT, "data", "processed", m["chart"])
+    universe = pd.read_csv(os.path.join(ROOT, m["universe"]), dtype={"code": str})
+    files = universe["symbol"] if "symbol" in universe else universe["code"]   # 미국은 시세 파일 이름이 티커
+    markets = set(universe["market"])
+    index_close = {INDEX_OF[k]: load_price(f"_index_{INDEX_OF[k]}", price_dir)["Close"] for k in markets}
+    next_day = pd.DatetimeIndex([index_close[m["index"]].index.max() + pd.offsets.BDay(1)])
 
     parts = []
-    for code, market in zip(universe["code"], universe["market"]):
-        p = load_price(code)
+    for code, market, fname in zip(universe["code"], universe["market"], files):
+        if not os.path.exists(os.path.join(price_dir, f"{fname}.csv")):
+            print(f"  {code}: 시세 파일 없음 → 건너뜀")
+            continue
+        p = load_price(fname, price_dir)
         f = stock_features(p, index_close[INDEX_OF[market]])
         f = f.reindex(f.index.append(next_day)).shift(1)                 # T-1일 종가까지
         parts.append(f.assign(code=code))
     feats = (pd.concat(parts).rename_axis("date").reset_index()
              .set_index(["date", "code"]).sort_index())
 
-    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-    feats.round(6).to_csv(OUT_FILE, encoding="utf-8-sig")
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    feats.round(6).to_csv(out_file, encoding="utf-8-sig")
     full = feats.dropna()
-    print(f"{len(universe)}종목, {len(feats)}행 x {feats.shape[1]}개 피처 저장 → {OUT_FILE}")
+    print(f"{len(universe)}종목, {len(feats)}행 x {feats.shape[1]}개 피처 저장 → {out_file}")
     print(f"기간: {feats.index.get_level_values('date').min().date()} ~ "
           f"{feats.index.get_level_values('date').max().date()}")
     print(f"빈 값 없는 행: {len(full)} ({len(full) / len(feats) * 100:.0f}%)")

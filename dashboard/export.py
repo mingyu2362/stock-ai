@@ -6,7 +6,11 @@
 - orderlog.json     최근 매매일 주문 기록 (주문 시각·체결 확인 시각, data/trades/log_날짜.json)
 - stocks.json       전체 상장 종목 (실시간 순위 검색창용)
 - universe.json     대회 종목 목록 (실시간 순위에서 대회 종목 표시용)
+- universe_us.json  나스닥100 종목 목록 (검색창·종목 화면용, code = 로이터 코드 AAPL.O)
+- today_us.json     나스닥100 AI 예측 순위 (model/predict.py --market us 결과, today.json 과 같은 모양)
 - backtest.json     (--backtest) 실전 전략과 모델 비교 백테스트. 오래 걸려서 따로 실행
+                    + strategies: 국내·나스닥 전략 비교(안정형·공격형·추가 전략)와 자산 곡선, 공격형 민감도
+- backtest_data_kr.json / backtest_data_us.json  (--backtest) 브라우저 "직접 백테스트"용 일별 순위·시세
 
 실전 기록 형식 (trade/ 쪽에서 남기는 파일)
 - data/trades/equity.csv  date, equity           (그날 장 마감 후 평가금액)
@@ -68,6 +72,49 @@ def universe():
     u = pd.read_csv(UNIVERSE_FILE, dtype={"code": str})
     write("universe.json", {r.code: {"name": r.name, "market": r.market} for r in u.itertuples()})
     return u.set_index("code")
+
+
+def universe_us():
+    path = os.path.join(ROOT, config.MARKETS["us"]["universe"])
+    if not os.path.exists(path):
+        print("  universe_us.json 건너뜀 (collect/price_us.py 먼저 실행)")
+        return None
+    u = pd.read_csv(path)
+    write("universe_us.json", {r.code: {"name": r.name, "market": r.market, "symbol": r.symbol, "eng": r.name_eng}
+                               for r in u.itertuples()})
+    return u.set_index("code")
+
+
+def today_us(u):
+    """나스닥100 순위 (주문 목록 없음: 팀 자동매매는 국내만)."""
+    files = sorted(glob.glob(os.path.join(PRED_DIR, "us_rank_*.csv")))
+    if u is None or not files:
+        print("  today_us.json 건너뜀 (model/predict.py --market us 먼저 실행)")
+        return
+    tag = os.path.basename(files[-1])[8:16]
+    rank = pd.read_csv(files[-1])
+    meta = json.load(open(os.path.join(ROOT, "data", "models", f"us_model_{config.US_MODEL}.json"),
+                          encoding="utf-8"))
+    chart_cols = ["ret_1d", "ret_5d", "ret_20d", "rsi_14", "vol_ratio_20", "volat_20"]
+    chart_file = os.path.join(PROC_DIR, config.MARKETS["us"]["chart"])
+    if os.path.exists(chart_file):
+        chart = pd.read_csv(chart_file, parse_dates=["date"])
+        chart = chart[chart["date"] == pd.Timestamp(tag)].set_index("code")[chart_cols]
+    else:
+        chart = pd.DataFrame(columns=chart_cols, index=pd.Index([], name="code"))
+    top = rank.head(TOP_ROWS).set_index("code").join(chart).join(u[["market", "symbol"]]).reset_index()
+    top = top[["rank", "code", "symbol", "name", "market", "score", "last_close", "buyable",
+               "ret_1d", "ret_5d", "ret_20d", "rsi_14", "vol_ratio_20", "volat_20"]]
+    write("today_us.json", {
+        "date": tag[:4] + "-" + tag[4:6] + "-" + tag[6:],
+        "base_close": str(rank["last_date"].max())[:10],
+        "model": meta["model"], "trained_until": meta["trained_until"], "currency": "USD",
+        "strategy": {"top_n": config.US_TOP_N, "sell_rank": config.US_SELL_RANK, "stop_loss": None,
+                     "min_value_usd": config.US_MIN_VALUE_USD},
+        "universe_size": int(len(rank)), "buyable": int(rank["buyable"].sum()),
+        "top": records(top), "orders": [],
+        "ranks": dict(zip(rank["code"], rank["rank"].astype(int))),
+    })
 
 
 def stocks():
@@ -237,6 +284,86 @@ def backtest():
                     "turnover30": clean(m["30일 거래금액(억)"], 1)},
         "periods": list(bt.PERIODS), "grid": records(grid, 1), "bench": records(pd.DataFrame(bench), 1),
         "noise_seeds": NOISE_SEEDS,
+        "strategies": strategies(),
+    })
+
+
+def strategies():
+    """전략 비교 (model/backtest.py STRATEGIES), 국내·나스닥. 연속 실행 자산 곡선(시작 = 100)과 기간별 수익률."""
+    import backtest as bt
+    out = {"periods": list(bt.PERIODS), "defs": {k: {"label": s["label"], "desc": s["desc"]}
+                                                  for k, s in bt.STRATEGIES.items()}}
+    for market, name in [("kr", config.LIVE_MODEL), ("us", config.US_MODEL)]:
+        if not os.path.exists(os.path.join(PRED_DIR, f"{bt.market_cfg(market)['prefix']}model_{name}.csv")):
+            print(f"  strategies: {market} 예측 파일이 없어 건너뜀 (model/train.py{' --market us' if market == 'us' else ''})")
+            continue
+        table, curves, px = bt.compare_strategies(name, market)
+        days = curves["stable"].index
+        bench = {"index": bt.index_curve(days, market), "equal": bt.equal_curve(px, days)}
+        curve = pd.DataFrame({k: v.values / bt.CAPITAL * 100 for k, v in {**curves, **bench}.items()})
+        curve.insert(0, "date", days.strftime("%Y-%m-%d"))
+        table = table.rename(columns={"전체%": "total", "MDD%": "mdd", "샤프": "sharpe", "매도 건수": "sells",
+                                      "승률%": "win", "손절 비율%": "stop_share", "30일 거래금액(억)": "turnover30"})
+        bench_rows = [{"key": k, **bt.period_returns(v), "total": (v.iloc[-1] / bt.CAPITAL - 1) * 100,
+                       "mdd": ((v / v.cummax()) - 1).min() * 100} for k, v in bench.items()]
+        out[market] = {
+            "model": name, "index_name": bt.market_cfg(market)["index_name"],
+            "equal_name": f"{px['Open'].shape[1]}종목 같은 비중",
+            "from": days[0].strftime("%Y-%m-%d"), "to": days[-1].strftime("%Y-%m-%d"),
+            "rows": records(table.drop(columns="전략"), 2), "bench": records(pd.DataFrame(bench_rows), 2),
+            "curve": records(curve, 2),
+        }
+        if market == "kr":
+            g = bt.aggr_grid(name, market).rename(columns={"손절": "stop", "추적": "trail", "전체%": "total", "MDD%": "mdd",
+                                                          "매도 건수": "sells", "손절 비율%": "stop_share"})
+            out["aggr_grid"] = records(g, 3)
+        backtest_data(market, name, px)
+    return out
+
+
+def backtest_data(market, name, px, k=60):
+    """브라우저 백테스트용: 날짜별 AI·모멘텀 순위 상위 k개(매수 불가는 음수 -(i+1))와 그 순위 값(동점은 평균 순위)
+    + 일별 시가·고가·저가·종가.
+    dashboard/src/backtest.js 가 model/backtest.py simulate 와 같은 규칙으로 돌린다."""
+    import backtest as bt
+    liquid, _ = bt.load_context(market, with_momentum=True)
+    pred = bt.load_pred(name, market, liquid.drop(columns="ret_20d"))
+    mom = bt.load_pred(name, market, liquid, score="momentum")
+    days = sorted(pred["date"].unique())
+    codes = list(px["Open"].columns)
+    pos = {c: i for i, c in enumerate(codes)}
+    us = market == "us"
+
+    def tops(p):
+        """(종목 번호 목록, 순위 목록). 순위는 simulate 와 같이 그날 전체 종목 중 점수 순위 (동점 평균)."""
+        idx, ranks = [], []
+        for _, g in p.groupby("date"):
+            g = g.assign(r=g["score"].rank(ascending=False)).sort_values(["score", "code"], ascending=[False, True])
+            g = g[g["code"].isin(pos)].head(k)
+            idx.append([pos[c] if ok else -(pos[c] + 1) for c, ok in zip(g["code"], g["liquid"])])
+            ranks.append([float(r) if r % 1 else int(r) for r in g["r"]])
+        return idx, ranks
+
+    def mat(frame):
+        f = frame.reindex(days)[codes]
+        f = f.round(4) if us else f.round(0)
+        return [[None if pd.isna(v) else (float(v) if us else int(v)) for v in row] for row in f.values]
+
+    names = bt._universe(bt.market_cfg(market)).set_index("code")["name"]
+    idx = bt.index_curve(pd.DatetimeIndex(days), market)
+    mc = bt.market_cfg(market)
+    write(f"backtest_data_{market}.json", {
+        "market": market, "model": name, "currency": "USD" if us else "KRW",
+        "costs": {"commission": mc["costs"][0], "tax": mc["costs"][1]}, "limit_up": mc["limit_up"],
+        "stop_slip": bt.STOP_SLIP, "cash_buffer": bt.CASH_BUFFER, "k": k,
+        "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in days],
+        "codes": codes, "names": [names.get(c, c) for c in codes],
+        "first_prev_close": [None if pd.isna(v) else float(v) for v in px["Close"].shift(1).reindex([days[0]])[codes].values[0]],
+        "open": mat(px["Open"]), "high": mat(px["High"]), "low": mat(px["Low"]), "close": mat(px["Close"]),
+        **dict(zip(["ai", "ai_rank"], tops(pred))), **dict(zip(["mom", "mom_rank"], tops(mom))),
+        "index": [round(float(v) / bt.CAPITAL * 100, 3) for v in idx.values], "index_name": mc["index_name"],
+        "presets": {key: {k2: s.get(k2) for k2 in ("top_n", "sell_rank", "stop", "trail_start", "trail", "weekly",
+                                                    "delay_after_stop", "score")} for key, s in bt.STRATEGIES.items()},
     })
 
 
@@ -245,6 +372,7 @@ def main():
     u = universe()
     stocks()
     today(u)
+    today_us(universe_us())
     market()
     performance()
     orderlog()

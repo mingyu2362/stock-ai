@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Change, dir, marketPhase, pct, signed, StockLink, Tile, useJson, useQuotes, won } from "../lib.jsx";
+import { Change, dir, fmtPrice, isUS, marketPhase, pct, signed, StockLink, Tile, useJson, useQuotes, won } from "../lib.jsx";
 import { korMoney, StartPaperForm } from "../order.jsx";
-import { cancelOrder, FEE, resetPaper, TAX, usePaper, valuation } from "../paper.js";
+import { cancelOrder, FEE, FEE_US, resetPaper, sellAll, sellProceeds, TAX, usePaper, valuation } from "../paper.js";
 import { Flash } from "../ui.jsx";
 import VersusChart from "../versus.jsx";
 
@@ -70,6 +70,53 @@ function PaperStart() {
   );
 }
 
+// 보유 종목 제목줄 + 일괄 매도 (선택한 종목, 없으면 전체를 지금 시세로 시장가 전량 매도)
+function SellAllBar({ rows, selected, setSelected }) {
+  const [step, setStep] = useState("idle");   // idle | confirm | busy
+  const [result, setResult] = useState(null);
+  const targets = selected.length ? rows.filter((r) => selected.includes(r.code)) : rows;
+  const estimate = targets.reduce((a, r) => a + sellProceeds(r.price, r.shares, r.code, r.fx).total, 0);
+  const label = selected.length ? `선택 ${selected.length}종목 매도` : "전체 일괄 매도";
+  const closedUS = targets.some((r) => r.us && !r.quote?.open);
+  const closedKR = targets.some((r) => !r.us && !r.quote?.open);
+
+  const run = async () => {
+    setStep("busy");
+    try {
+      const r = await sellAll(targets.map((t) => t.code));
+      setResult({ ok: true, text: `${r.done.length}종목 매도 체결 · 받은 금액 ${won(r.total)}원${r.failed.length ? ` (시세 없음: ${r.failed.join(", ")})` : ""}` });
+      setSelected([]);
+    } catch (e) {
+      setResult({ ok: false, text: e.message });
+    }
+    setStep("idle");
+  };
+
+  return (
+    <>
+      <div className="filters sellall-bar">
+        <h2 style={{ margin: 0 }}>보유 종목 {rows.length}개</h2>
+        {rows.length > 0 && (step === "confirm" ? (
+          <span className="confirm-inline">
+            {targets.length}종목을 시장가로 모두 팔까요? <b className="num">약 {won(estimate)}원</b>
+            <button className="icon-btn" onClick={() => setStep("idle")}>아니요</button>
+            <button className="icon-btn danger" onClick={run}>매도</button>
+          </span>
+        ) : (
+          <button className="btn-order sell btn-sellall" disabled={step === "busy"}
+            onClick={() => { setResult(null); setStep("confirm"); }}>
+            {step === "busy" ? "매도 중…" : label}
+          </button>
+        ))}
+      </div>
+      {step === "confirm" && (closedKR || closedUS) && (
+        <p className="sub">장이 닫힌 종목은 마지막 가격(종가)으로 체결돼요.</p>
+      )}
+      {result && <p className={result.ok ? "ok-text" : "error-text"}>{result.text}</p>}
+    </>
+  );
+}
+
 function PaperAccount({ s }) {
   const quotes = useQuotes([...Object.keys(s.positions), ...s.orders.map((o) => o.code)], 10_000);
   const v = valuation(s, quotes);
@@ -77,6 +124,9 @@ function PaperAccount({ s }) {
   const [histFilter, setHistFilter] = useState("all");
   const phase = marketPhase();
   const trades = s.trades.filter((t) => histFilter === "all" || t.side === histFilter);
+  const [selectedRaw, setSelected] = useState([]);
+  const selected = selectedRaw.filter((c) => s.positions[c]);   // 팔린 종목은 선택에서 빠진다
+  const allChecked = v.rows.length > 0 && selected.length === v.rows.length;
 
   return (
     <>
@@ -122,26 +172,39 @@ function PaperAccount({ s }) {
       </div>
 
       <div className="card section">
-        <h2>보유 종목 {v.rows.length}개</h2>
+        <SellAllBar rows={v.rows} selected={selected} setSelected={setSelected} />
         {v.rows.length === 0 ? (
           <div className="empty">
             <strong>아직 보유 종목이 없어요</strong>
-            위 검색창에서 종목을 찾아 종목 화면 오른쪽 주문창으로 사 보세요.
+            위 검색창에서 종목을 찾아 종목 화면 오른쪽 주문창으로 사 보세요. 국내 종목과 나스닥100 종목을 살 수 있어요.
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th className="l">종목</th><th>현재가</th><th>오늘</th><th>보유</th><th>평단가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>비중</th></tr>
+                <tr>
+                  <th className="l check-col">
+                    <input type="checkbox" aria-label="전체 선택" checked={allChecked}
+                      onChange={(e) => setSelected(e.target.checked ? v.rows.map((r) => r.code) : [])} />
+                  </th>
+                  <th className="l">종목</th><th>현재가</th><th>오늘</th><th>보유</th><th>평단가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>비중</th>
+                </tr>
               </thead>
               <tbody>
                 {v.rows.map((r) => (
                   <tr key={r.code} className="row-link" onClick={() => { window.location.hash = `stock/${r.code}`; }}>
-                    <td className="l"><StockLink code={r.code} name={r.name} /> <span className="muted">{r.code}</span></td>
-                    <td className={`num ${dir(r.quote?.change)}`}><Flash value={r.price}>{won(r.price)}</Flash></td>
+                    <td className="l check-col" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`${r.name} 선택`} checked={selected.includes(r.code)}
+                        onChange={(e) => setSelected((s) => (e.target.checked ? [...s, r.code] : s.filter((c) => c !== r.code)))} />
+                    </td>
+                    <td className="l">
+                      <StockLink code={r.code} name={r.name} /> <span className="muted">{r.code}</span>
+                      {r.us && <span className="badge us">나스닥</span>}
+                    </td>
+                    <td className={`num ${dir(r.quote?.change)}`}><Flash value={r.price}>{fmtPrice(r.price, r.code)}</Flash></td>
                     <td>{r.quote ? <Change change={r.quote.change} ratio={r.quote.ratio} arrowOnly /> : "–"}</td>
                     <td className="num">{won(r.shares)}</td>
-                    <td className="num">{won(r.avg)}</td>
+                    <td className="num">{fmtPrice(r.avg, r.code)}</td>
                     <td className="num">{won(r.value)}</td>
                     <td className={`num ${dir(r.pnl)}`}>{signed(Math.round(r.pnl))}</td>
                     <td className={`num ${dir(r.ratio)}`}>{pct(r.ratio, { digits: 2 })}</td>
@@ -173,8 +236,8 @@ function PaperAccount({ s }) {
                     <td className="l num">{fmtTime(o.at)}</td>
                     <td className="l"><StockLink code={o.code} name={o.name} /></td>
                     <td className="l"><span className={`badge ${o.side}`}>{o.side === "buy" ? "매수" : "매도"}</span></td>
-                    <td className="num">{won(o.price)}</td>
-                    <td className="num">{won(quotes[o.code]?.price)}</td>
+                    <td className="num">{fmtPrice(o.price, o.code)}</td>
+                    <td className="num">{fmtPrice(quotes[o.code]?.price, o.code)}</td>
                     <td className="num">{won(o.shares)}</td>
                     <td><button className="icon-btn" onClick={() => cancelOrder(o.id)}>취소</button></td>
                   </tr>
@@ -205,11 +268,11 @@ function PaperAccount({ s }) {
                     <td className="l"><StockLink code={t.code} name={t.name} /></td>
                     <td className="l">
                       <span className={`badge ${t.side}`}>{t.side === "buy" ? "매수" : "매도"}</span>
-                      <span className="muted"> {t.type === "limit" ? "지정가" : "시장가"}</span>
+                      <span className="muted"> {t.note || (t.type === "limit" ? "지정가" : "시장가")}</span>
                     </td>
-                    <td className="num">{won(t.price)}</td>
+                    <td className="num">{fmtPrice(t.price, t.code)}</td>
                     <td className="num">{won(t.shares)}</td>
-                    <td className="num">{won(t.price * t.shares)}</td>
+                    <td className="num" title={t.fx ? `환율 ${t.fx}원/$` : undefined}>{won(t.amountKrw ?? t.price * t.shares)}</td>
                     <td className="num">{won(t.fee + t.tax)}</td>
                     <td className={`num ${dir(t.pnl)}`}>{t.pnl == null ? "–" : signed(Math.round(t.pnl))}</td>
                   </tr>
@@ -219,7 +282,8 @@ function PaperAccount({ s }) {
           </div>
         )}
         <p className="fine">
-          수수료 {(FEE * 100).toFixed(3)}% (매수·매도), 매도 시 거래세 {(TAX * 100).toFixed(2)}%. 실제 증권사·연도에 따라 달라요.
+          국내: 수수료 {(FEE * 100).toFixed(3)}% (매수·매도), 매도 시 거래세 {(TAX * 100).toFixed(2)}%.
+          나스닥: 수수료 {(FEE_US * 100).toFixed(2)}%, 거래세 없음, 체결 순간 환율로 원화 환전 (금액·손익은 원화). 실제 증권사·연도에 따라 달라요.
           호가 잔량·체결 순서는 따지지 않는 연습용 모의투자예요.
         </p>
       </div>

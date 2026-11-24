@@ -13,7 +13,11 @@
 입력: data/processed/ 피처, data/models/, data/trades/holdings.csv (선택: code, shares 열. 없으면 보유 없음)
 출력: data/predictions/rank_{날짜}.csv   전 종목 순위
       data/predictions/orders_{날짜}.csv 주문 목록 (action, code, name, shares, ref_price, amount, rank)
+나스닥100 (--market us): 순위만 낸다 (팀 자동매매는 국내만) → data/predictions/us_rank_{날짜}.csv
+  날짜는 미국 거래일. 대시보드 AI 추천·모의투자에서 참고용으로 보여 준다
+
 실행: python model/predict.py [--cash 100000000] [--holdings data/trades/holdings.csv]
+      python model/predict.py --market us
       (프로젝트 루트에서. trade/run_daily.py 에서는 decide() 를 직접 불러 써도 된다)
 """
 
@@ -29,42 +33,47 @@ from xgboost import XGBRegressor
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import config  # noqa: E402
-from model.train import MODEL_DIR, PRED_DIR, PRICE_DIR, UNIVERSE_FILE, load_features  # noqa: E402
+from model.train import MODEL_DIR, PRED_DIR, load_features, load_universe, market_paths  # noqa: E402
 
 HOLDINGS_FILE = os.path.join(ROOT, "data", "trades", "holdings.csv")
 CASH_BUFFER = 0.99
 
 
-def last_closes():
+def last_closes(market="kr"):
     """종목별 마지막 종가와 그 날짜."""
-    codes = pd.read_csv(UNIVERSE_FILE, dtype={"code": str})["code"]
+    price_dir = market_paths(market)["price_dir"]
     rows = []
-    for code in codes:
-        p = pd.read_csv(os.path.join(PRICE_DIR, f"{code}.csv"), parse_dates=["Date"]).iloc[-1]
+    for code, fname in zip(*load_universe(market)[["code", "file"]].values.T):
+        path = os.path.join(price_dir, f"{fname}.csv")
+        if not os.path.exists(path):
+            continue
+        p = pd.read_csv(path, parse_dates=["Date"]).iloc[-1]
         rows.append({"code": code, "last_date": p["Date"], "last_close": p["Close"]})
     return pd.DataFrame(rows).set_index("code")
 
 
-def rank_stocks(name=config.LIVE_MODEL):
+def rank_stocks(name=config.LIVE_MODEL, market="kr"):
     """피처 표 마지막 날짜의 종목 순위 (1위 = 다음 날 시장 대비 가장 강할 것으로 본 종목)."""
-    with open(os.path.join(MODEL_DIR, f"model_{name}.json"), encoding="utf-8") as f:
+    mp = market_paths(market)
+    with open(os.path.join(MODEL_DIR, f"{mp['prefix']}model_{name}.json"), encoding="utf-8") as f:
         meta = json.load(f)
-    df, _ = load_features()
+    df, _ = load_features(market)
     day = df.index.get_level_values("date").max()
     today = df.xs(day, level="date")
     score = 0
     for seed in meta["seeds"]:
         m = XGBRegressor()
-        m.load_model(os.path.join(MODEL_DIR, f"model_{name}_seed{seed}.json"))
+        m.load_model(os.path.join(MODEL_DIR, f"{mp['prefix']}model_{name}_seed{seed}.json"))
         score = score + m.predict(today[meta["cols"]])
     out = pd.DataFrame({"score": score / len(meta["seeds"])}, index=today.index)
 
-    universe = pd.read_csv(UNIVERSE_FILE, dtype={"code": str}).set_index("code")
-    px = last_closes()
-    index_last = pd.read_csv(os.path.join(PRICE_DIR, "_index_KOSPI.csv"),
+    universe = load_universe(market).set_index("code")
+    px = last_closes(market)
+    index_last = pd.read_csv(os.path.join(mp["price_dir"], f"_index_{mp['index']}.csv"),
                              parse_dates=["Date"])["Date"].max()
     out = out.join(universe[["name"]]).join(px)
-    out["liquid"] = today["log_value_20"] >= np.log1p(config.MIN_VALUE_KRW)
+    min_value = config.US_MIN_VALUE_USD if market == "us" else config.MIN_VALUE_KRW
+    out["liquid"] = today["log_value_20"] >= np.log1p(min_value)
     out["fresh"] = out["last_date"] == index_last          # 거래정지 등으로 시세가 끊긴 종목 제외
     out["buyable"] = out["liquid"] & out["fresh"]
     out = out.sort_values("score", ascending=False)
@@ -107,7 +116,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cash", type=float, default=100_000_000)
     parser.add_argument("--holdings", default=HOLDINGS_FILE)
+    parser.add_argument("--market", default="kr", choices=["kr", "us"])
     args = parser.parse_args()
+
+    if args.market == "us":
+        day, meta, ranking = rank_stocks(config.US_MODEL, "us")
+        os.makedirs(PRED_DIR, exist_ok=True)
+        out = os.path.join(PRED_DIR, f"us_rank_{day:%Y%m%d}.csv")
+        ranking.reset_index().to_csv(out, index=False, encoding="utf-8-sig")
+        print(f"나스닥100 예측일 {day.date()} | 모델 {meta['model']} (정답 ~{meta['trained_until']}까지 학습)")
+        print(ranking.head(10)[["rank", "name", "score", "last_close", "buyable"]].to_string())
+        print(f"저장 → {out}")
+        return
 
     day, meta, ranking = rank_stocks()
     holdings = {}

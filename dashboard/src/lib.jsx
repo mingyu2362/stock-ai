@@ -44,7 +44,8 @@ export function usePolling(url, refreshMs, { always = false } = {}) {
       .then((data) => alive && setState({ data, error: null, url }))
       .catch((error) => alive && setState((s) => ({ ...s, error })));
     load();
-    const timer = setInterval(() => (always || marketOpen()) && load(), refreshMs);
+    const hasUS = /[A-Z]\.[A-Z]{1,2}(,|&|$)/.test(url);   // 나스닥 종목이 섞이면 미국 장중에도 갱신
+    const timer = setInterval(() => (always || marketOpen() || (hasUS && usMarketOpen())) && load(), refreshMs);
     return () => { alive = false; clearInterval(timer); };
   }, [url, refreshMs, always]);
   return state.url === url ? state : { data: null, error: state.error, url };
@@ -56,14 +57,31 @@ export function useQuotes(codes, refreshMs = 15_000) {
   return usePolling(key ? `/api/quote?codes=${key}` : null, refreshMs).data?.quotes || {};
 }
 
-// 한국거래소 호가 단위 (2023년 이후 코스피·코스닥 공통, trade/kis_api.py 와 같음)
-export function tickSize(price) {
+// 나스닥 종목은 네이버 로이터 코드(AAPL.O)로 다룬다. 국내는 6자리 코드
+export const isUS = (code) => /^[A-Z0-9-]{1,8}\.[A-Z]{1,2}$/.test(String(code || ""));
+export const isStockCode = (code) => /^[0-9A-Z]{6}$/.test(String(code || "")) || isUS(code);
+export const usd = (v) => (v == null ? "–" : `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+// 종목 가격 표시: 국내 72,500 / 나스닥 $347.36
+export const fmtPrice = (v, code) => (isUS(code) ? usd(v) : won(v));
+// 가격 뒤 단위 ("원" 또는 "")
+export const priceUnit = (code) => (isUS(code) ? "" : "원");
+
+// 한국거래소 호가 단위 (2023년 이후 코스피·코스닥 공통, trade/kis_api.py 와 같음). 나스닥은 0.01달러
+export function tickSize(price, code) {
+  if (isUS(code)) return 0.01;
   for (const [limit, tick] of [[2_000, 1], [5_000, 5], [20_000, 10], [50_000, 50], [200_000, 100], [500_000, 500]]) {
     if (price < limit) return tick;
   }
   return 1_000;
 }
-export const roundTick = (price) => Math.round(price / tickSize(price)) * tickSize(price);
+export const roundTick = (price, code) => {
+  if (isUS(code)) return Math.round(price * 100) / 100;
+  return Math.round(price / tickSize(price)) * tickSize(price);
+};
+// 가격이 호가 단위에 맞는지 (달러는 센트 단위, 부동소수 오차 허용)
+export const onTick = (price, code) => (isUS(code)
+  ? Math.abs(price * 100 - Math.round(price * 100)) < 1e-6
+  : price % tickSize(price) === 0);
 
 // 한국 날짜 YYYY-MM-DD
 export const kstDate = (t = Date.now()) => new Date(t + 9 * 3600_000).toISOString().slice(0, 10);
@@ -131,7 +149,14 @@ export function Loading({ state, children }) {
   return children(state.data);
 }
 
-export const marketLabel = (m) => (m?.startsWith("KOSDAQ") ? "코스닥" : "코스피");
+export const marketLabel = (m) => (m?.startsWith("NASDAQ") ? "나스닥" : m?.startsWith("KOSDAQ") ? "코스닥" : "코스피");
+
+// 미국 정규장 (한국 시간 기준, 서머타임 반영: 뉴욕 09:30~16:00 평일)
+export function usMarketOpen(t = Date.now()) {
+  const ny = new Date(new Date(t).toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const hm = ny.getHours() * 100 + ny.getMinutes();
+  return ny.getDay() >= 1 && ny.getDay() <= 5 && hm >= 930 && hm < 1600;
+}
 
 // 한국 시간 평일 09:00~15:30
 export function marketOpen() {
