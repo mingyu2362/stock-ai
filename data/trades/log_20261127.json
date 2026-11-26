@@ -1,0 +1,12 @@
+{
+ "sells": [],
+ "buys": [],
+ "buys_done": true,
+ "start_holdings": {
+  "131290": {
+   "name": "티에스이",
+   "shares": 626,
+   "avg_price": 155144.728
+  }
+ }
+}
