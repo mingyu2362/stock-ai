@@ -3,16 +3,16 @@
 매일 장 시작 전(또는 전날 장 마감 후) 실행한다.
 1. 피처 표의 맨 끝 날짜(다음 거래일) 행으로 351종목 점수를 매기고 순위를 낸다
    (data/models/ 의 config.LIVE_MODEL 모델, 시작값별 점수 평균)
-2. 보유 종목과 비교해 주문을 정한다 (model/backtest.py 와 같은 규칙)
-   - 매도: 보유 종목이 config.SELL_RANK 위 밖이면 전량 매도
-   - 매수: 빈 자리(config.TOP_N - 보유 수)만큼 순위 높은 종목을 매수
+2. 보유 종목과 비교해 주문을 정한다: trade/strategy.py plan() ("AI 추세", 지금 투자 성향의 종목 수)
+   - 매도: 종가가 20일선 아래, 또는 손절선 아래 마감
+   - 매수: 시장 필터(코스피 >= 60일선)를 통과하면 빈 자리만큼, 종가 > 20일선 > 60일선 종목 중 AI 점수 순
            20일 평균 거래대금 config.MIN_VALUE_KRW 미만, 최근 시세가 없는(거래정지) 종목은 제외
-   - 수량: (현금 + 보유 평가액) x 0.99 / TOP_N 을 전일 종가로 나눈 주식 수 (config.MAX_ORDER_KRW 상한)
-     시가가 전일 종가와 다르면 금액이 조금 달라진다 → 동시호가 시장가 주문 기준
+   - 수량: 총평가 x 0.99 / 종목 수 를 전일 종가로 나눈 주식 수 (config.MAX_ORDER_KRW 상한)
+   여기서는 주문 목록만 만든다. 보유 상태(positions.json)는 trade/run_daily.py 가 실제 주문 뒤에 저장한다
 
-입력: data/processed/ 피처, data/models/, data/trades/holdings.csv (선택: code, shares 열. 없으면 보유 없음)
+입력: data/processed/ 피처, data/models/, data/trades/holdings.csv (선택: code, shares[, avg_price] 열)
 출력: data/predictions/rank_{날짜}.csv   전 종목 순위
-      data/predictions/orders_{날짜}.csv 주문 목록 (action, code, name, shares, ref_price, amount, rank)
+      data/predictions/orders_{날짜}.csv 주문 목록 (action, code, name, shares, ref_price, amount, rank, reason, atr)
 나스닥100 (--market us): 순위만 낸다 (팀 자동매매는 국내만) → data/predictions/us_rank_{날짜}.csv
   날짜는 미국 거래일. 대시보드 AI 추천·모의투자에서 참고용으로 보여 준다
 
@@ -34,6 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import config  # noqa: E402
 from model.train import MODEL_DIR, PRED_DIR, load_features, load_universe, market_paths  # noqa: E402
+from trade import strategy  # noqa: E402
 
 HOLDINGS_FILE = os.path.join(ROOT, "data", "trades", "holdings.csv")
 CASH_BUFFER = 0.99
@@ -81,37 +82,6 @@ def rank_stocks(name=config.LIVE_MODEL, market="kr"):
     return day, meta, out
 
 
-def decide(ranking, holdings, cash):
-    """보유 {code: shares}, 현금 → 주문 목록. 매도 먼저, 매수는 빈 자리만큼."""
-    orders = []
-    held = {c: s for c, s in holdings.items() if s > 0}
-    value = sum(s * ranking["last_close"].get(c, 0) for c, s in held.items())
-    target = min((cash + value) * CASH_BUFFER / config.TOP_N, config.MAX_ORDER_KRW)
-
-    for code, shares in held.items():
-        rank = ranking["rank"].get(code, np.inf)
-        if rank > config.SELL_RANK:
-            orders.append(("sell", code, shares, rank))
-    keep = {c for c in held if c not in {o[1] for o in orders}}
-
-    slots = config.TOP_N - len(keep)
-    for code, row in ranking[ranking["buyable"]].iterrows():
-        if slots <= 0:
-            break
-        if code in keep:
-            continue
-        shares = int(target // row["last_close"])
-        if shares > 0:
-            orders.append(("buy", code, shares, row["rank"]))
-            slots -= 1
-
-    o = pd.DataFrame(orders, columns=["action", "code", "shares", "rank"])
-    o["name"] = o["code"].map(ranking["name"])
-    o["ref_price"] = o["code"].map(ranking["last_close"])
-    o["amount"] = o["shares"] * o["ref_price"]
-    return o[["action", "code", "name", "shares", "ref_price", "amount", "rank"]], sorted(keep)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cash", type=float, default=100_000_000)
@@ -133,8 +103,13 @@ def main():
     holdings = {}
     if os.path.exists(args.holdings):
         h = pd.read_csv(args.holdings, dtype={"code": str})
-        holdings = dict(zip(h["code"], h["shares"]))
-    orders, keep = decide(ranking, holdings, args.cash)
+        holdings = {r["code"]: {"name": r.get("name"), "shares": int(r["shares"]),
+                                "avg_price": r.get("avg_price") if pd.notna(r.get("avg_price")) else None}
+                    for r in h.to_dict("records") if r["shares"] > 0}
+    mode = strategy.load_mode()
+    print(f"투자 성향 {strategy.LABEL[mode]} ({config.SLOTS[mode]}종목)")
+    orders, state = strategy.plan(ranking, holdings, args.cash, mode=mode, log=lambda m: print("  " + m))
+    keep = [p["code"] for p in state["positions"] if "exit_reason" not in p]
 
     os.makedirs(PRED_DIR, exist_ok=True)
     tag = day.strftime("%Y%m%d")
@@ -144,7 +119,7 @@ def main():
 
     pd.set_option("display.width", 200)
     print(f"예측일 {day.date()} | 모델 {meta['model']} (정답 ~{meta['trained_until']}까지 학습) | "
-          f"전략: {config.TOP_N}종목, {config.SELL_RANK}위 밖 매도")
+          f"전략: AI 추세 {config.SLOTS[mode]}종목")
     print("\n상위 10:")
     print(ranking.head(10)[["rank", "name", "score", "last_close", "buyable"]].to_string())
     print(f"\n계속 보유: {[ranking['name'].get(c, c) for c in keep] or '없음'}")

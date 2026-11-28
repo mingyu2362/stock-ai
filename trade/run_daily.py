@@ -3,16 +3,19 @@
 아침 (python -m trade.run_daily [--live])   06:40 ~ 08:00 사이에 시작
 1. 주말이면 종료, 같은 날 이미 주문했으면 종료 (중복 주문 방지)
 2. 잔고 조회 → data/trades/holdings.csv
-3. model/daily.py --cash --holdings  (수집 → 피처 → 예측 → orders_{오늘}.csv, 월요일은 재학습)
-   08:30 이후에 시작했으면 이미 만든 orders_{오늘}.csv 를 쓰고, 없으면 그때 예측한다 (재학습 없이)
+3. model/daily.py --cash --holdings  (수집 → 피처 → 예측 → rank_{오늘}.csv, 월요일은 재학습)
+   08:30 이후에 시작했으면 이미 만든 rank_{오늘}.csv 를 쓰고, 없으면 그때 예측한다 (재학습 없이)
    → 늦게 시작하면 매도·매수가 시가가 아니라 그 시각 가격으로 나간다
-4. 08:30 ~ 09:00 동시호가: 매도 주문 (시장가)
-5. 09:00 직후: 매수 주문 (현재가 +1% 지정가 → 즉시 체결, 1분 안에 안 되면 취소 후 새 가격으로 최대 3번)
+4. 주문 정하기: trade/strategy.py plan() — 전략 "AI 추세", 투자 성향(mode.json)별 종목 수
+   (실제 잔고로 다시 정해 orders_{오늘}.csv 를 덮어씀. 보유 상태는 data/strategy/positions.json)
+5. 08:30 ~ 09:00 동시호가: 매도 주문 (시장가) — 20일선 이탈·손절선 아래 마감
+6. 09:00 직후: 매수 주문 (현재가 +1% 지정가 → 즉시 체결, 1분 안에 안 되면 취소 후 새 가격으로 최대 3번)
    시장가 매수는 한투가 상한가 근처 가격으로 현금을 잡아 두어 여러 종목을 다 살 수 없어서 지정가를 쓴다
    매수 금액은 주문가능현금 안에서 종목마다 같게 나눈다
 
 장 마감 후 (python -m trade.run_daily --close)   15:40 이후
 - 오늘 체결 → data/trades/trades.csv, 총평가금액 → equity.csv, 보유 → holdings.csv
+- 보유 종목 종가 고점·ATR·손절선 갱신 → positions.json (다음 날 장중 감시 trade/monitor.py 가 씀)
 - dashboard/export.py (대시보드 데이터 갱신)
 
 안전장치
@@ -42,7 +45,7 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import config  # noqa: E402
-from trade import aggressive  # noqa: E402
+from trade import strategy  # noqa: E402
 from trade.kis_api import Kis, KisError, real_orders_allowed, round_up_tick  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
@@ -55,6 +58,7 @@ BUY_PREMIUM = 0.01               # 매수 지정가 = 현재가 x (1 + 1%)
 BUY_ROUNDS = 3                   # 안 되면 취소 후 다시 내는 횟수
 ROUND_WAIT_SEC = 60
 CASH_USE = 0.995                 # 주문가능현금 중 쓰는 비율 (수수료 여유)
+LIMIT_UP = 0.29                  # 전일 종가 대비 이 이상 오른 종목은 매수하지 않음 (백테스트와 같음)
 
 
 def now():
@@ -91,8 +95,9 @@ class DayLog:
 
 def save_holdings(holdings):
     os.makedirs(TRADE_DIR, exist_ok=True)
-    pd.DataFrame([{"code": c, "name": h["name"], "shares": h["shares"]} for c, h in holdings.items()],
-                 columns=["code", "name", "shares"]).to_csv(HOLDINGS_FILE, index=False, encoding="utf-8-sig")
+    pd.DataFrame([{"code": c, "name": h["name"], "shares": h["shares"], "avg_price": h.get("avg_price")}
+                  for c, h in holdings.items()],
+                 columns=["code", "name", "shares", "avg_price"]).to_csv(HOLDINGS_FILE, index=False, encoding="utf-8-sig")
 
 
 def predict(cash, retrain):
@@ -118,9 +123,9 @@ def unfilled(kis, code, before, shares):
 
 def buy_all(kis, buys, live, daylog, cap=config.MAX_ORDER_KRW):
     """매수 목록을 현재가 +1% 지정가로 산다. 주문가능현금을 종목 수로 나눠 금액을 맞춘다.
-    cap: 종목당 최대 금액 (공격형은 None = 전액)"""
+    cap: 종목당 최대 금액. 현재가가 전일 종가(ref_price) +29% 이상(상한가 근처)이면 사지 않는다"""
     cap = cap or float("inf")
-    if kis.is_real:   # 실전은 공격형(전액)이어도 1건 한도를 넘지 않게
+    if kis.is_real:   # 실전은 1건 한도를 넘지 않게
         cap = min(cap, config.REAL_MAX_ORDER_KRW)
     ordered = {b["code"] for b in daylog.data["buys"]}   # 중간에 멈췄다 다시 실행해도 같은 종목을 또 사지 않게
     buys = buys[~buys["code"].isin(ordered)]
@@ -140,6 +145,9 @@ def buy_all(kis, buys, live, daylog, cap=config.MAX_ORDER_KRW):
         remaining = None
         for rnd in range(BUY_ROUNDS):
             price = kis.price(code)
+            if rnd == 0 and o.get("ref_price") and price >= o["ref_price"] * (1 + LIMIT_UP):
+                log(f"  {name}: 현재가 {price:,.0f}원이 전일 종가 +{LIMIT_UP:.0%} 이상(상한가 근처) → 건너뜀")
+                break
             limit = round_up_tick(price * (1 + BUY_PREMIUM))
             shares = math.floor(budget / limit) if remaining is None else remaining
             if shares <= 0:
@@ -216,31 +224,36 @@ def morning(args):
         + (", ".join(f"{h['name']} {h['shares']}주" for h in bal["holdings"].values()) or "없음"))
 
     orders_file = os.path.join(PRED_DIR, f"orders_{tag}.csv")
+    rank_file = os.path.join(PRED_DIR, f"rank_{tag}.csv")
     if args.test and not args.skip_predict:
         # 재학습은 하지 않는다 (실전 모델을 낮에 바꾸지 않게)
         predict(bal["cash"], retrain=False)
-        # 장 마감 후에 돌리면 오늘 종가까지 들어가 예측일이 다음 거래일이 된다 → 방금 만든 목록을 쓴다
-        made = sorted(f for f in os.listdir(PRED_DIR) if f.startswith("orders_"))
-        orders_file = os.path.join(PRED_DIR, made[-1])
-        log(f"시험 주문 목록: {made[-1]}")
+        # 장 마감 후에 돌리면 오늘 종가까지 들어가 예측일이 다음 거래일이 된다 → 방금 만든 순위를 쓴다
+        made = sorted(f for f in os.listdir(PRED_DIR) if f.startswith("rank_"))
+        rank_file = os.path.join(PRED_DIR, made[-1])
+        orders_file = rank_file.replace("rank_", "orders_")
+        log(f"시험 순위: {made[-1]}")
     elif not args.skip_predict:
         early = now().strftime("%H:%M") < "08:30"
-        if early or not os.path.exists(orders_file):
+        if early or not os.path.exists(rank_file):
             # 늦게 시작했으면 재학습은 건너뛴다 (시간이 걸려 주문이 더 늦어짐)
             predict(bal["cash"], retrain=early and today.weekday() == 0)
-    if not os.path.exists(orders_file):
-        raise SystemExit(f"{orders_file} 이 없어요. 장 마감 후에는 다음 거래일 목록이 만들어져요.")
-    mode = aggressive.load_mode()
-    if mode == "aggressive":
-        sells, buys = aggressive_orders(bal, os.path.join(PRED_DIR, f"rank_{tag}.csv"))
-    else:
+    mode = strategy.load_mode()
+    state = None
+    if args.day:   # 그날 만들어 둔 주문 목록을 그대로 (지금 시세로는 그날 판단을 다시 할 수 없음)
+        if not os.path.exists(orders_file):
+            raise SystemExit(f"{orders_file} 이 없어요")
         orders = pd.read_csv(orders_file, dtype={"code": str})
-        sells, buys = orders[orders["action"] == "sell"], orders[orders["action"] == "buy"]
-        state = aggressive.load_state()
-        if state.get("position") and live:   # 공격형 → 안정형: 공격형 보유 기록을 지운다 (다시 공격형이 되면 1위부터)
-            state["position"] = None
-            aggressive.save_state(state)
-    log(f"[{'공격형' if mode == 'aggressive' else '안정형'}] 주문 목록: 매도 {len(sells)}건, 매수 {len(buys)}건")
+    else:
+        if not os.path.exists(rank_file):
+            raise SystemExit(f"{rank_file} 이 없어요. 장 마감 후에는 다음 거래일 순위가 만들어져요.")
+        ranking = pd.read_csv(rank_file, dtype={"code": str}).set_index("code")
+        log(f"[{strategy.LABEL[mode]} {config.SLOTS[mode]}종목] 전략 AI 추세로 주문 정하기")
+        orders, state = strategy.plan(ranking, bal["holdings"], bal["cash"], mode=mode, log=log)
+        if not args.test:   # 대시보드 "오늘 주문"이 실제 주문과 같게
+            orders.to_csv(orders_file, index=False, encoding="utf-8-sig")
+    sells, buys = orders[orders["action"] == "sell"], orders[orders["action"] == "buy"]
+    log(f"주문 목록: 매도 {len(sells)}건, 매수 {len(buys)}건")
 
     # 매도: 동시호가 시장가
     if len(sells):
@@ -257,17 +270,25 @@ def morning(args):
                 continue
             order_no, _ = kis.order("sell", o["code"], shares)
             daylog.data["sells"].append({"code": o["code"], "name": o["name"], "shares": shares,
-                                         "order_no": order_no, "time": f"{now():%H:%M:%S}"})
+                                         "order_no": order_no, "time": f"{now():%H:%M:%S}",
+                                         "note": o.get("reason", "")})
             daylog.save()
             log(f"  매도 {o['name']}({o['code']}) {shares}주 시장가 → 주문번호 {order_no}")
+    if state is not None:   # 판 종목은 보유 기록에서 빼고 정리 기록으로 (가격은 아침 잔고의 현재가로 추정)
+        for pos in [p for p in state["positions"] if "exit_reason" in p]:
+            price = bal["holdings"].get(pos["code"], {}).get("price")
+            strategy.record_exit(state, pos, price, pos["exit_reason"] + " → 동시호가 시장가", estimated=True)
 
     # 매수: 시가 체결 직후 지정가
     if len(buys):
         if live:
             wait_until(BUY_START)
-        buy_all(kis, buys, live, daylog, cap=None if mode == "aggressive" else config.MAX_ORDER_KRW)
-        if mode == "aggressive" and live:
-            start_aggressive(kis, buys.iloc[0], today)
+        buy_all(kis, buys, live, daylog)
+        if live and state is not None:
+            for _, b in buys.iterrows():
+                start_position(kis, b, today, state)
+    if live and state is not None:
+        strategy.save_state(state)
     if live:
         daylog.data["buys_done"] = True
         daylog.save()
@@ -277,39 +298,17 @@ def morning(args):
                        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
-def aggressive_orders(bal, rank_file):
-    """공격형 아침 주문. 공격형 종목을 들고 있으면 그대로 두고(다른 종목만 판다),
-    없으면(손절·익절했거나 막 공격형으로 바꿈) 전부 팔고 AI 1위를 전액 산다."""
-    state = aggressive.load_state()
-    pos = aggressive.held_position(state, bal["holdings"])
-    if pos:
-        target = pos["code"]
-        buys = pd.DataFrame(columns=["code", "name", "amount"])
-        log(f"공격형: {pos['name']} 보유 유지 (손절선 {aggressive.stop_price(pos)[0]:,}원)")
-    else:
-        if not os.path.exists(rank_file):
-            raise SystemExit(f"{rank_file} 이 없어 공격형 매수 종목(AI 1위)을 못 골라요")
-        rank = pd.read_csv(rank_file, dtype={"code": str}).sort_values("rank")
-        top = rank[rank["buyable"]].iloc[0]
-        target = top["code"]
-        buys = pd.DataFrame([{"code": target, "name": top["name"], "amount": bal["total"]}])
-        log(f"공격형: 보유 없음 → AI {int(top['rank'])}위 {top['name']} 전액 매수")
-    sells = pd.DataFrame([{"code": c, "name": h["name"], "shares": h["shares"]}
-                          for c, h in bal["holdings"].items() if c != target],
-                         columns=["code", "name", "shares"])
-    return sells, buys
-
-
-def start_aggressive(kis, buy, today):
-    """공격형 매수가 체결되면 보유 기록을 새로 쓴다 (매수가 = 평균 단가, 고점 = 매수가)."""
+def start_position(kis, buy, today, state):
+    """매수가 체결되면 보유 기록에 더한다 (매수가 = 평균 단가, 처음 손절선 = 매수가 - ATR x2)."""
     h = kis.balance()["holdings"].get(buy["code"])
     if not h:
-        return log(f"공격형: {buy['name']} 이 체결되지 않아 보유 기록을 쓰지 않아요")
-    state = aggressive.load_state()
-    state["position"] = {"code": buy["code"], "name": h["name"], "shares": h["shares"], "entry": h["avg_price"],
-                         "entry_date": today.strftime("%Y-%m-%d"), "peak": h["avg_price"]}
-    aggressive.save_state(state)
-    log(f"공격형 시작: {h['name']} {h['shares']}주 @ {h['avg_price']:,.0f} → 손절선 {state['stop']:,}원")
+        return log(f"{buy['name']} 이 체결되지 않아 보유 기록을 쓰지 않아요")
+    atr = buy.get("atr")
+    if atr is None or pd.isna(atr):
+        atr = strategy.snapshot()[0]["atr"][buy["code"]]
+    pos = strategy.new_position(buy["code"], h["name"], h["shares"], h["avg_price"], today.strftime("%Y-%m-%d"), atr)
+    state["positions"] = [p for p in state["positions"] if p["code"] != buy["code"]] + [pos]
+    log(f"보유 시작: {h['name']} {h['shares']}주 @ {h['avg_price']:,.0f} → 손절선 {pos['stop']:,}원 ({pos['stop_reason']})")
 
 
 def fills_by_code(kis, daylog, bal, tag):
@@ -360,16 +359,10 @@ def close(args):
         fills = fills_by_code(kis, DayLog(tag), bal, tag)
     save_holdings(bal["holdings"])
     os.makedirs(TRADE_DIR, exist_ok=True)
-    state = aggressive.load_state()
-    if state.get("position"):   # 공격형 고점·손절선 갱신 (손으로 팔았으면 기록을 지움)
-        pos = aggressive.held_position(state, bal["holdings"])
-        if pos:
-            aggressive.update_peak(pos, kis.quote(pos["code"]), day)
-        else:
-            state["position"] = None
-        aggressive.save_state(state)
-        log(f"공격형: {pos['name']} 고점 {pos['peak']:,.0f} → 손절선 {state['stop']:,}원 ({state['stop_reason']})"
-            if pos else "공격형: 보유 기록 종목이 잔고에 없어 기록을 지움")
+    state = strategy.load_state()
+    if state["positions"]:   # 종가 고점·ATR·손절선 갱신 (손으로 팔았으면 기록을 지움)
+        strategy.close_update(state, bal["holdings"], kis.quote, day, log=log)
+        strategy.save_state(state)
 
     tfile = os.path.join(TRADE_DIR, "trades.csv")
     trades = pd.read_csv(tfile, dtype={"code": str}) if os.path.exists(tfile) else pd.DataFrame(

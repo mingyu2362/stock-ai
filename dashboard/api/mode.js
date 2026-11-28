@@ -1,5 +1,5 @@
 // 투자 성향 (안정형 / 공격형) 조회·전환 (Vercel 서버리스 함수, 개발 중에는 vite.config.js 가 같은 함수를 씀)
-// GET  /api/mode                        → { mode, changedAt, state }   state = data/strategy/aggressive.json
+// GET  /api/mode                        → { mode, changedAt, state }   state = data/strategy/positions.json (보유·손절선, 매매 프로그램이 씀)
 // POST /api/mode { mode, password }     → 팀 비밀번호가 맞으면 저장소의 data/strategy/mode.json 을 바꾼다
 //
 // 매매 프로그램(GitHub Actions)이 저장소의 파일을 읽으므로 GitHub API 로 파일을 직접 고친다.
@@ -12,7 +12,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 const MODES = { stable: "안정형", aggressive: "공격형" };
 const MODE_PATH = "data/strategy/mode.json";
-const STATE_PATH = "data/strategy/aggressive.json";
+const STATE_PATH = "data/strategy/positions.json";
 
 function send(res, status, body) {
   res.statusCode = status;

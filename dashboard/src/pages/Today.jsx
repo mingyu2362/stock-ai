@@ -215,7 +215,7 @@ function NasdaqPicks() {
 
 export default function Today() {
   const state = useJson("today.json");
-  const aggressive = useMode().data?.mode === "aggressive";
+  const mode = useMode().data?.mode;
   const codes = (state.data?.top || []).map((t) => t.code);
   const quotes = useQuotes(codes, 15_000);
   const sparks = useSparks(codes.slice(0, 3));
@@ -284,23 +284,27 @@ export default function Today() {
             <div className="grid tiles">
               <Tile label="예측일" value={d.date} note={`${d.base_close} 종가까지 반영`} />
               <Tile label="모델" value={`모델 ${d.model}`} note={`차트 + 시장 피처, ${d.trained_until}까지 학습`} />
-              <Tile label="전략" value={`상위 ${d.strategy.top_n}종목`}
-                note={`${d.strategy.sell_rank}위 밖으로 밀리면 매도 · 손절 없음`} />
+              <Tile label="전략" value={`${d.strategy.name ?? "AI 추세"}${d.strategy.slots && mode ? ` · ${d.strategy.slots[mode]}종목` : ""}`}
+                note={d.strategy.market
+                  ? <>코스피 {won(d.strategy.market.kospi)} {d.strategy.market.ok ? "≥" : "<"} {d.strategy.market_ma}일선 {won(d.strategy.market.kospi_ma)} · {d.strategy.market.ok ? "매수 가능" : "새 매수 쉼"}</>
+                  : `종가 > ${d.strategy.ma}일선 > ${d.strategy.ma_long}일선 종목 중 AI 순`} />
               <Tile label="매수 가능 종목" value={`${d.buyable} / ${d.universe_size}`}
                 note={`20일 평균 거래대금 ${eok(d.strategy.min_value_krw)} 이상`} />
             </div>
 
             <div className="card section">
-              <h2>팀 AI 계좌 오늘의 주문<span className="badge">안정형일 때 하는 매매예요</span>
-                {aggressive && <span className="badge blocked">지금은 공격형이라 이 주문은 실행되지 않아요</span>}</h2>
-              <p className="sub">08:30~09:00 동시호가에 시장가로 제출. 수량은 전일 종가 기준이라 체결 금액은 조금 달라질 수 있어요.</p>
+              <h2>팀 AI 계좌 오늘의 주문{mode && <span className="badge">{mode === "aggressive" ? "공격형" : "안정형"} 기준</span>}</h2>
+              <p className="sub">
+                매도는 08:30~09:00 동시호가에 시장가, 매수는 09:00 직후 지정가. 수량은 전일 종가 기준이라 체결 금액은 조금 달라질 수 있어요.
+                손절선 매도는 장중에 따로 나가요.
+              </p>
               {d.orders.length === 0 ? (
-                <div className="empty">주문 없음 — 보유 종목을 그대로 유지해요</div>
+                <div className="empty">주문 없음 — 보유 종목을 그대로 유지해요{d.strategy.market && !d.strategy.market.ok ? " (코스피가 60일선 아래라 새로 사지 않아요)" : ""}</div>
               ) : (
                 <div className="table-wrap">
                   <table>
                     <thead>
-                      <tr><th className="l">구분</th><th className="l">종목</th><th>순위</th><th>수량</th><th>기준가</th><th>금액</th></tr>
+                      <tr><th className="l">구분</th><th className="l">종목</th><th>순위</th><th>수량</th><th>기준가</th><th>금액</th><th className="l">이유</th></tr>
                     </thead>
                     <tbody>
                       {d.orders.map((o) => (
@@ -311,6 +315,7 @@ export default function Today() {
                           <td className="num">{won(o.shares)}주</td>
                           <td className="num">{won(o.ref_price)}</td>
                           <td className="num">{eok(o.amount)}원</td>
+                          <td className="l muted" style={{ fontSize: 12 }}>{o.reason || ""}</td>
                         </tr>
                       ))}
                     </tbody>

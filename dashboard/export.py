@@ -31,6 +31,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "model"))
 import config  # noqa: E402
+from trade import strategy  # noqa: E402
 
 OUT_DIR = os.path.join(ROOT, "dashboard", "public", "data")
 PRED_DIR = os.path.join(ROOT, "data", "predictions")
@@ -159,8 +160,10 @@ def today(u):
         "date": tag[:4] + "-" + tag[4:6] + "-" + tag[6:],
         "base_close": str(rank["last_date"].max())[:10],
         "model": meta["model"], "trained_until": meta["trained_until"],
-        "strategy": {"top_n": config.TOP_N, "sell_rank": config.SELL_RANK,
-                     "stop_loss": config.STOP_LOSS, "min_value_krw": config.MIN_VALUE_KRW},
+        "strategy": {"name": "AI 추세", "slots": config.SLOTS, "ma": config.STRAT_MA,
+                     "ma_long": config.STRAT_MA_LONG, "atr_init": config.STRAT_ATR_INIT,
+                     "atr_trail": config.STRAT_ATR_TRAIL, "market_ma": config.STRAT_MARKET_MA,
+                     "min_value_krw": config.MIN_VALUE_KRW, "market": strategy.market_filter()},
         "universe_size": int(len(rank)), "buyable": int(rank["buyable"].sum()),
         "top": records(top), "orders": records(orders),
         "ranks": dict(zip(rank["code"], rank["rank"].astype(int))),   # 전체 종목 순위 (종목 상세·계좌 화면용)
@@ -288,17 +291,51 @@ def backtest():
     })
 
 
+TREND_DEFS = {
+    "trend_stable": {"label": "AI 추세 안정형 (실전)",
+                     "desc": f"종가 > 20일선 > 60일선 종목 중 AI 점수 순 {config.SLOTS['stable']}종목. 20일선 이탈·손절선"
+                             f"(매수가 - ATR x{config.STRAT_ATR_INIT:g}, 종가 고점 - ATR x{config.STRAT_ATR_TRAIL:g}) 매도, "
+                             f"코스피 60일선 아래면 새로 안 삼"},
+    "trend_aggressive": {"label": "AI 추세 공격형 (실전)",
+                         "desc": f"AI 추세 안정형과 같은 규칙, {config.SLOTS['aggressive']}종목에 집중"},
+}
+
+
+def trend_strategies(days):
+    """AI 추세 안정형·공격형을 days 기간에 이어서 돌린 (표 행, 자산 곡선)."""
+    import backtest as bt
+    import strategy_lab as lab
+    d = lab.load_data()
+    spec = lab.CANDIDATES["T1"]
+    rows, curves = [], {}
+    for key, mode in (("trend_stable", "stable"), ("trend_aggressive", "aggressive")):
+        eq, tr, _, _ = lab.simulate(d, spec, days[0], days[-1], config.SLOTS[mode])
+        eq = eq.reindex(days).ffill()
+        ret = eq.pct_change().fillna(eq.iloc[0] / lab.CAPITAL - 1)
+        curves[key] = eq
+        rows.append({"key": key, "전략": TREND_DEFS[key]["label"], **bt.period_returns(eq),
+                     "전체%": (eq.iloc[-1] / lab.CAPITAL - 1) * 100, "MDD%": ((eq / eq.cummax()) - 1).min() * 100,
+                     "샤프": ret.mean() / ret.std() * np.sqrt(252), "매도 건수": len(tr),
+                     "승률%": (tr["ret"] > 0).mean() * 100 if len(tr) else None,
+                     "손절 비율%": tr["reason"].str.startswith("stop").mean() * 100 if len(tr) else None})
+    return rows, curves
+
+
 def strategies():
     """전략 비교 (model/backtest.py STRATEGIES), 국내·나스닥. 연속 실행 자산 곡선(시작 = 100)과 기간별 수익률."""
     import backtest as bt
-    out = {"periods": list(bt.PERIODS), "defs": {k: {"label": s["label"], "desc": s["desc"]}
-                                                  for k, s in bt.STRATEGIES.items()}}
+    out = {"periods": list(bt.PERIODS), "defs": {**TREND_DEFS, **{k: {"label": s["label"], "desc": s["desc"]}
+                                                                for k, s in bt.STRATEGIES.items()}}}
     for market, name in [("kr", config.LIVE_MODEL), ("us", config.US_MODEL)]:
         if not os.path.exists(os.path.join(PRED_DIR, f"{bt.market_cfg(market)['prefix']}model_{name}.csv")):
             print(f"  strategies: {market} 예측 파일이 없어 건너뜀 (model/train.py{' --market us' if market == 'us' else ''})")
             continue
         table, curves, px = bt.compare_strategies(name, market)
         days = curves["stable"].index
+        if market == "kr":   # 지금 실전 전략 "AI 추세" (model/strategy_lab.py 엔진, trade/strategy.py 와 같은 규칙)
+            t_rows, t_curves = trend_strategies(days)
+            table = pd.concat([pd.DataFrame(t_rows), table], ignore_index=True)
+            curves = {**t_curves, **curves}
         bench = {"index": bt.index_curve(days, market), "equal": bt.equal_curve(px, days)}
         curve = pd.DataFrame({k: v.values / bt.CAPITAL * 100 for k, v in {**curves, **bench}.items()})
         curve.insert(0, "date", days.strftime("%Y-%m-%d"))
@@ -321,7 +358,7 @@ def strategies():
     return out
 
 
-def backtest_data(market, name, px, k=60):
+def backtest_data(market, name, px, k=100):
     """브라우저 백테스트용: 날짜별 AI·모멘텀 순위 상위 k개(매수 불가는 음수 -(i+1))와 그 순위 값(동점은 평균 순위)
     + 일별 시가·고가·저가·종가.
     dashboard/src/backtest.js 가 model/backtest.py simulate 와 같은 규칙으로 돌린다."""
@@ -336,13 +373,14 @@ def backtest_data(market, name, px, k=60):
 
     def tops(p):
         """(종목 번호 목록, 순위 목록). 순위는 simulate 와 같이 그날 전체 종목 중 점수 순위 (동점 평균)."""
-        idx, ranks = [], []
+        idx, ranks, knives = [], [], []
         for _, g in p.groupby("date"):
             g = g.assign(r=g["score"].rank(ascending=False)).sort_values(["score", "code"], ascending=[False, True])
             g = g[g["code"].isin(pos)].head(k)
             idx.append([pos[c] if ok else -(pos[c] + 1) for c, ok in zip(g["code"], g["liquid"])])
             ranks.append([float(r) if r % 1 else int(r) for r in g["r"]])
-        return idx, ranks
+            knives.append([pos[c] for c in g.loc[g["knife"], "code"]])
+        return idx, ranks, knives
 
     def mat(frame):
         f = frame.reindex(days)[codes]
@@ -360,10 +398,10 @@ def backtest_data(market, name, px, k=60):
         "codes": codes, "names": [names.get(c, c) for c in codes],
         "first_prev_close": [None if pd.isna(v) else float(v) for v in px["Close"].shift(1).reindex([days[0]])[codes].values[0]],
         "open": mat(px["Open"]), "high": mat(px["High"]), "low": mat(px["Low"]), "close": mat(px["Close"]),
-        **dict(zip(["ai", "ai_rank"], tops(pred))), **dict(zip(["mom", "mom_rank"], tops(mom))),
+        **dict(zip(["ai", "ai_rank", "ai_knife"], tops(pred))), **dict(zip(["mom", "mom_rank", "mom_knife"], tops(mom))),
         "index": [round(float(v) / bt.CAPITAL * 100, 3) for v in idx.values], "index_name": mc["index_name"],
         "presets": {key: {k2: s.get(k2) for k2 in ("top_n", "sell_rank", "stop", "trail_start", "trail", "weekly",
-                                                    "delay_after_stop", "score")} for key, s in bt.STRATEGIES.items()},
+                                                    "delay_after_stop", "score", "knife")} for key, s in bt.STRATEGIES.items()},
     })
 
 

@@ -1,0 +1,48 @@
+{
+ "positions": [
+  {
+   "code": "131290",
+   "name": "티에스이",
+   "shares": 626,
+   "entry": 155144.728,
+   "entry_date": "2026-11-26",
+   "atr_entry": 25471.018728693143,
+   "peak": 155144.728,
+   "atr": 25471.018728693143,
+   "stop": 104203,
+   "stop_reason": "처음 손절 (매수가 - ATR x2)"
+  }
+ ],
+ "exits": [
+  {
+   "date": "2026-11-18",
+   "time": "09:10",
+   "code": "180640",
+   "name": "한진칼",
+   "shares": 406,
+   "price": 217946,
+   "entry": 204577.586,
+   "reason": "수동 매도 (원익홀딩스로 교체) (이전 규칙)"
+  }
+ ],
+ "market": {
+  "date": "2026-11-26",
+  "kospi": 4711.21,
+  "kospi_ma": 6047.84,
+  "ok": false
+ },
+ "mode": "aggressive",
+ "rules": {
+  "slots": {
+   "stable": 6,
+   "aggressive": 3
+  },
+  "ma": 20,
+  "ma_long": 60,
+  "atr_n": 14,
+  "atr_init": 2.0,
+  "atr_trail": 3.0,
+  "market_ma": 60
+ },
+ "updated_at": "2026-11-28T21:59:12+09:00"
+}

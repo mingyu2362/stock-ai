@@ -9,6 +9,7 @@
 // 3. 장중: 저가가 손절선에 닿으면 손절가 -0.2% 로 매도. 그 뒤 고점을 그날 고가로 갱신
 // 4. 종가로 평가
 // 손절선: 고점이 매수가 +trail_start 에 닿은 뒤로는 고점 x (1 - trail), 그 전에는 매수가 x (1 - stop)
+// knife: 떨어지는 칼날(ai_knife/mom_knife, 20일 -30% 아래·변동성 상위 20%) 종목은 사지 않음 (공격형)
 
 const isoWeek = (s) => {
   const d = new Date(`${s}T00:00:00Z`);
@@ -21,13 +22,14 @@ const isoWeek = (s) => {
 export function runBacktest(data, opt) {
   const {
     top_n: topN, sell_rank: sellRank = null, stop = null, trail_start: trailStart = null, trail = null,
-    weekly = false, delay_after_stop: delayAfterStop = false, score = "ai", from = 0, to = data.dates.length - 1,
+    weekly = false, delay_after_stop: delayAfterStop = false, score = "ai", knife = false, from = 0, to = data.dates.length - 1,
     capital = 100_000_000,
   } = opt;
   const { commission, tax } = data.costs;
   const slip = data.stop_slip, buffer = data.cash_buffer, limitUp = data.limit_up;
   const lists = score === "momentum" ? data.mom : data.ai;
   const rankLists = score === "momentum" ? data.mom_rank : data.ai_rank;
+  const knifeLists = score === "momentum" ? data.mom_knife : data.ai_knife;
   const pos = new Map();         // i -> { shares, entry, peak, date }
   const lastClose = new Map();
   const equity = [], trades = [];
@@ -50,6 +52,7 @@ export function runBacktest(data, opt) {
     const rebalance = !weekly || week !== prevWeek;
     prevWeek = week;
     let stopped = 0;
+    const knives = knife ? new Set(knifeLists?.[d] || []) : null;
 
     const sell = (i, price, reason) => {
       const p = pos.get(i);
@@ -81,7 +84,7 @@ export function runBacktest(data, opt) {
         if (slots <= 0) break;
         if (v < 0) continue;   // 거래대금 부족
         const i = v;
-        if (pos.has(i) || op[i] == null || pc[i] == null) continue;
+        if (pos.has(i) || op[i] == null || pc[i] == null || knives?.has(i)) continue;
         if (limitUp != null && op[i] >= pc[i] * (1 + limitUp)) continue;
         const shares = Math.floor(Math.min(target, cash / (1 + commission)) / op[i]);
         if (shares <= 0) continue;

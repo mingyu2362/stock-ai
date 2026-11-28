@@ -1,5 +1,5 @@
-# 공격형 장중 감시 (trade/monitor.py): 09:00 ~ 15:20 1분마다 손절선 확인, 닿으면 전량 시장가 매도
-# 안정형이거나 공격형 보유 종목이 없으면 바로 끝난다.
+# 장중 손절 감시 (trade/monitor.py, 안정형·공격형 공통): 09:00 ~ 15:20 1분마다 손절선 확인, 닿으면 전량 시장가 매도
+# 보유 종목이 없으면 09:30 까지 아침 매수 기록을 기다렸다가 그래도 없으면 끝난다.
 #
 # 시작: 외부 예약(cron)이 workflow_dispatch 로 장 시작 무렵 실행한다 (GitHub 예약 실행은 자주 빠짐).
 #   POST https://api.github.com/repos/<저장소>/actions/workflows/monitor.yml/dispatches
@@ -62,6 +62,6 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/strategy data/trades
+          git add -A data/strategy data/trades
           git commit -m "monitor $(TZ=Asia/Seoul date '+%F %H:%M')" || echo "변경 없음"
           git pull --rebase -X theirs && git push

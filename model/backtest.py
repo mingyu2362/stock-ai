@@ -10,12 +10,14 @@
         (공격형 규칙, trade/aggressive.py 와 같음). 고점은 그날 손절 확인이 끝난 뒤 그날 고가로 갱신 (보수적)
 - 손절 다음 날 매수 (delay_after_stop): 손절로 빈 자리는 그날 다시 채우지 않는다 (공격형 실전 흐름과 같음)
 - 주간 교체 (weekly): 순위 매도·매수를 그 주 첫 거래일에만. 손절은 매일
+- 칼날 제외 (knife): 그날 20일 수익률 config.AGGR_KNIFE_RET20 아래이거나 20일 변동성 상위 20% 종목은 사지 않음 (공격형)
 - 공포 비중: 공포지수(news_fear_idx_3d)가 학습 기간 상위 20%인 날은 자리당 금액에 fear_exposure 를 곱하고,
              그보다 많이 들고 있는 종목은 줄인다 (국내만)
 - 비용: 국내 config.COMMISSION·SELL_TAX, 나스닥 config.US_COMMISSION·US_SELL_TAX (환율은 무시, 달러 기준)
 - 비교 기준: 지수 보유, 전 종목 같은 비중 (종목 목록이 지금 기준이라 과거 성과가 실제보다 좋게 나옴 = 생존 편향)
 
-전략 목록 (STRATEGIES): 안정형(실전) · 공격형(실전) · 안정형+추적손절 · 주간 교체 · 분산형 10종목 · 모멘텀(AI 없음)
+전략 목록 (STRATEGIES): 안정형(실전) · 공격형(실전, 2026-11-26 수정) · 공격형(이전 1종목) · 안정형+추적손절 · 주간 교체 ·
+  분산형 10종목 · 모멘텀(AI 없음)
   모멘텀은 모델 대신 20일 수익률 순위로 같은 규칙을 돌린 기준선 → AI 점수가 단순 추세 추종보다 나은지 본다
 
 입력: data/predictions/{접두어}model_{이름}.csv (model/train.py 월별 롤링 예측), 시세, 피처
@@ -61,13 +63,19 @@ GRID = {"top_n": [3, 5, 7], "sell_mult": [4, 10]}   # sell_rank = top_n * sell_m
 
 # 비교할 전략. score="momentum" 이면 모델 점수 대신 20일 수익률
 STRATEGIES = {
-    "stable": {"label": "안정형 (실전)", "desc": "AI 상위 3종목 1/3씩, 12위 밖으로 밀리면 매도",
+    "stable": {"label": "이전 안정형 (대회)", "desc": "대회 때 안정형: AI 상위 3종목 1/3씩, 12위 밖으로 밀리면 매도",
                "top_n": config.TOP_N, "sell_rank": config.SELL_RANK},
-    "aggressive": {"label": "공격형 (실전)",
-                   "desc": f"AI 1위 1종목 전액, 매수가 -{config.AGGR_STOP_LOSS:.0%} 손절, "
-                           f"+{config.AGGR_BREAKEVEN_AT:.0%} 뒤로는 고점 -{config.AGGR_TRAIL:.0%} 추적 익절, 판 다음 날 1위 매수",
-                   "top_n": 1, "sell_rank": None, "stop": config.AGGR_STOP_LOSS,
-                   "trail_start": config.AGGR_BREAKEVEN_AT, "trail": config.AGGR_TRAIL, "delay_after_stop": True},
+    "aggressive": {"label": "이전 공격형 (11/26 수정)",
+                   "desc": f"AI 상위 {config.AGGR_SLOTS}종목 반씩, 매수가 -{config.AGGR_STOP_LOSS:.0%} 손절, "
+                           f"+{config.AGGR_BREAKEVEN_AT:.0%} 뒤로는 고점 -{config.AGGR_TRAIL:.0%} 추적 익절, "
+                           f"{config.AGGR_SELL_RANK}위 밖 매도, 떨어지는 칼날(20일 -30%·변동성 상위 20%) 제외",
+                   "top_n": config.AGGR_SLOTS, "sell_rank": config.AGGR_SELL_RANK, "stop": config.AGGR_STOP_LOSS,
+                   "trail_start": config.AGGR_BREAKEVEN_AT, "trail": config.AGGR_TRAIL, "delay_after_stop": True,
+                   "knife": True},
+    "aggressive_old": {"label": "이전 공격형 (대회)",
+                       "desc": "대회 때 규칙: AI 1위 1종목 전액, 매수가 -12% 손절, +10% 뒤로 고점 -8% 추적 익절, 순위로는 안 팖",
+                       "top_n": 1, "sell_rank": None, "stop": 0.12, "trail_start": 0.10, "trail": 0.08,
+                       "delay_after_stop": True},
     "stable_trail": {"label": "안정형 + 추적 손절", "desc": "안정형에 매수가 -10% 손절, +10% 뒤로 고점 -8% 추적 익절",
                      "top_n": config.TOP_N, "sell_rank": config.SELL_RANK, "stop": 0.10,
                      "trail_start": 0.10, "trail": 0.08},
@@ -115,12 +123,15 @@ def load_prices(market="kr"):
 
 
 def load_context(market="kr", with_momentum=False):
-    """(유동성 표, 공포 상위 날짜). with_momentum 이면 20일 수익률(ret_20d) 열도 붙인다."""
+    """(유동성·칼날 표, 공포 상위 날짜). with_momentum 이면 20일 수익률(ret_20d) 열도 붙인다.
+    knife: 떨어지는 칼날 (trade/aggressive.py knife_codes 와 같은 기준)"""
     mc = market_cfg(market)
-    cols = ["date", "code", "log_value_20"] + (["ret_20d"] if with_momentum else [])
+    cols = ["date", "code", "log_value_20", "ret_20d", "volat_20"]
     chart = pd.read_csv(mc["chart"], dtype={"code": str}, parse_dates=["date"], usecols=cols)
     chart["liquid"] = chart["log_value_20"] >= np.log1p(mc["min_value"])
-    liquid = chart.drop(columns="log_value_20")
+    vq = chart.groupby("date")["volat_20"].rank(pct=True)
+    chart["knife"] = (chart["ret_20d"] < config.AGGR_KNIFE_RET20) | (vq > config.AGGR_KNIFE_VOL_PCT)
+    liquid = chart.drop(columns=["log_value_20", "volat_20"] + ([] if with_momentum else ["ret_20d"]))
     if market == "us":
         return liquid, pd.Series(dtype=bool)
     market_f = pd.read_csv(os.path.join(PROC_DIR, "market_features.csv"),
@@ -139,18 +150,23 @@ def load_pred(name, market="kr", liquid=None, score="model"):
         liquid, _ = load_context(market, with_momentum=score == "momentum")
     pred = pred.merge(liquid, on=["date", "code"], how="left")
     pred["liquid"] = pred["liquid"].fillna(False).astype(bool)
+    pred["knife"] = pred["knife"].fillna(False).astype(bool)
     if score == "momentum":
         pred["score"] = pred["ret_20d"].fillna(-np.inf)
     return pred.drop(columns=[c for c in ["ret_20d"] if c in pred])
 
 
 def simulate(pred, px, fear_high, top_n, sell_rank, stop, fear_exposure=1.0, *, trail_start=None, trail=None,
-             weekly=False, delay_after_stop=False, costs=None, limit_up=LIMIT_UP):
+             weekly=False, delay_after_stop=False, costs=None, limit_up=LIMIT_UP, max_hold=None, buy_rank=None):
     """일별 평가금액과 거래 기록. pred 에는 liquid(매수 가능 유동성) 열이 있어야 한다.
-    sell_rank=None 이면 순위로 팔지 않는다. 반환: (평가금액, 일별 거래금액, 매도 기록)"""
+    sell_rank=None 이면 순위로 팔지 않는다.
+    buy_rank: 이 순위 안의 종목만 산다 (없으면 자리를 비워 둠)
+    max_hold: 시간 손절. 산 뒤 이 거래일 수가 지나도록 추적 익절이 켜지지 않았으면(= 기대만큼 안 오름) 시가 매도
+    반환: (평가금액, 일별 거래금액, 매도 기록)"""
     commission, tax = costs or (config.COMMISSION, config.SELL_TAX)
     cash, pos = float(CAPITAL), {}               # pos[code] = [주식 수, 매수가, 고점]
     last_close = {}
+    held_days = {}                               # 산 뒤 지난 거래일 수 (시간 손절용)
     equity, traded, trades = [], [], []
     prev_week = None
 
@@ -172,6 +188,7 @@ def simulate(pred, px, fear_high, top_n, sell_rank, stop, fear_exposure=1.0, *, 
         pos[code][0] -= shares
         if pos[code][0] == 0:
             del pos[code]
+            held_days.pop(code, None)
 
     for day, g in pred.groupby("date"):
         day_traded = 0.0
@@ -192,6 +209,8 @@ def simulate(pred, px, fear_high, top_n, sell_rank, stop, fear_exposure=1.0, *, 
                 stopped += 1
             elif rebalance and sell_rank is not None and rank.get(code, np.inf) > sell_rank:
                 sell(code, op[code], pos[code][0], "rank")
+            elif max_hold and held_days.get(code, 0) >= max_hold and kind != "trail":
+                sell(code, op[code], pos[code][0], "time")
 
         # 2. 자리당 금액, 공포 날은 줄이기
         value_open = {c: s * (op[c] if not np.isnan(op.get(c, np.nan)) else last_close[c])
@@ -208,6 +227,8 @@ def simulate(pred, px, fear_high, top_n, sell_rank, stop, fear_exposure=1.0, *, 
         if rebalance:
             slots = top_n - len(pos) - (stopped if delay_after_stop else 0)
             ok = g[g["liquid"] & ~g["code"].isin(pos)]
+            if buy_rank is not None:
+                ok = ok[ok["code"].map(rank) <= buy_rank]
             ok = ok[ok["code"].map(op).notna() & ok["code"].map(pc).notna()]
             if limit_up is not None:
                 ok = ok[ok["code"].map(op) < ok["code"].map(pc) * (1 + limit_up)]
@@ -233,6 +254,7 @@ def simulate(pred, px, fear_high, top_n, sell_rank, stop, fear_exposure=1.0, *, 
 
         # 5. 종가 평가
         for code in pos:
+            held_days[code] = held_days.get(code, 0) + 1
             if not np.isnan(cl.get(code, np.nan)):
                 last_close[code] = cl[code]
             elif code not in last_close:
@@ -250,6 +272,8 @@ def run_strategy(key, pred, px, fear_high, market="kr", pred_mom=None):
     s = STRATEGIES[key]
     mc = market_cfg(market)
     p = pred_mom if s.get("score") == "momentum" else pred
+    if s.get("knife"):
+        p = p.assign(liquid=p["liquid"] & ~p["knife"])
     return simulate(p, px, fear_high, s["top_n"], s["sell_rank"], s.get("stop"), 1.0,
                     trail_start=s.get("trail_start"), trail=s.get("trail"), weekly=s.get("weekly", False),
                     delay_after_stop=s.get("delay_after_stop", False), costs=mc["costs"], limit_up=mc["limit_up"])
@@ -343,15 +367,17 @@ def compare_strategies(name, market="kr", px=None):
 
 
 def aggr_grid(name, market="kr"):
-    """공격형 손절(stop)·추적 익절(trail) 값 민감도. 시작 기준(trail_start)은 config 값 그대로."""
+    """공격형(실전 규칙: 종목 수·순위 매도·칼날 제외는 그대로) 손절(stop)·추적 익절 폭(trail) 민감도."""
     px = load_prices(market)
     liquid, fear_high = load_context(market)
     pred = load_pred(name, market, liquid)
+    pred = pred.assign(liquid=pred["liquid"] & ~pred["knife"])
     mc = market_cfg(market)
     rows = []
     for stop, trail in itertools.product(*AGGR_GRID.values()):
-        eq, traded, trades = simulate(pred, px, fear_high, 1, None, stop, trail_start=config.AGGR_BREAKEVEN_AT,
-                                      trail=trail, delay_after_stop=True, costs=mc["costs"], limit_up=mc["limit_up"])
+        eq, traded, trades = simulate(pred, px, fear_high, config.AGGR_SLOTS, config.AGGR_SELL_RANK, stop,
+                                      trail_start=config.AGGR_BREAKEVEN_AT, trail=trail, delay_after_stop=True,
+                                      costs=mc["costs"], limit_up=mc["limit_up"])
         m = metrics(eq, traded, trades)
         rows.append({"손절": stop, "추적": trail, **period_returns(eq), "전체%": m["수익률%"], "MDD%": m["MDD%"],
                      "매도 건수": m["매도 건수"], "손절 비율%": m["손절 비율%"]})

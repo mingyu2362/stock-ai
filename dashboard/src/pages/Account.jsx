@@ -161,8 +161,6 @@ function Balance({ creds, mode, onDisconnect }) {
 
   const d = state.data;
   const rankOf = today?.ranks || {};
-  const aggressive = mode.data?.mode === "aggressive";
-  const sellRank = aggressive ? null : today?.strategy?.sell_rank;   // 공격형은 순위로 팔지 않음
   const time = d && new Date(d.fetchedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const real = creds.server === "real";
 
@@ -207,7 +205,7 @@ function Balance({ creds, mode, onDisconnect }) {
             <h2>보유 종목 {d.positions.length}개</h2>
             <p className="sub">
               한국투자증권 {SERVER_LABEL[creds.server]} 계좌 실시간 잔고. AI 순위는 {today?.date ?? "–"} 예측 기준이며,
-              {aggressive ? " 공격형이라 순위와 상관없이 손절선에서만 팔아요." : sellRank ? ` ${sellRank}위 밖으로 밀리면 다음 날 시가에 팔아요.` : ""}
+              {" "}손절선 아래면 장중에 바로, 종가가 20일선 아래면 다음 날 아침에 팔아요.
             </p>
             {d.positions.length === 0 ? (
               <div className="empty">보유 종목이 없어요.</div>

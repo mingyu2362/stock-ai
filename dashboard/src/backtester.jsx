@@ -5,7 +5,7 @@ import { LineChartBox } from "./chart.jsx";
 import { Loading, Pct, Tile, useJson, won } from "./lib.jsx";
 
 export const PRESET_LABEL = {
-  stable: "안정형 (실전)", aggressive: "공격형 (실전)", stable_trail: "안정형 + 추적 손절",
+  stable: "이전 안정형 (대회)", aggressive: "이전 공격형 (11/26 수정)", aggressive_old: "이전 공격형 (대회)", stable_trail: "안정형 + 추적 손절",
   weekly: "주간 교체 5종목", diversified: "분산형 10종목", momentum: "모멘텀 (AI 없음)",
 };
 const REASON = { rank: "순위 이탈", stop: "손절", stop_gap: "손절 (시가)", trail: "추적 익절", trail_gap: "추적 익절 (시가)" };
@@ -98,6 +98,10 @@ function BacktestBody({ d }) {
           hint="고점이 매수가 +이만큼 닿으면" />
         <Select label="추적 익절 폭" value={opt.trail ?? 0.08} onChange={(v) => set({ trail: v })} options={TRAIL_OPTS}
           hint="그 뒤 고점 대비 이만큼 빠지면 매도" />
+        <label className="bt-field bt-check">
+          <input type="checkbox" checked={!!opt.knife} onChange={(e) => set({ knife: e.target.checked })} />
+          <span>떨어지는 칼날 제외 (20일 −30%·변동성 상위 20%)</span>
+        </label>
         <label className="bt-field bt-check">
           <input type="checkbox" checked={!!opt.delay_after_stop} onChange={(e) => set({ delay_after_stop: e.target.checked })} />
           <span>손절한 자리는 다음 날 채우기</span>

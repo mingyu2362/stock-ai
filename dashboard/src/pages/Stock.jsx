@@ -3,7 +3,7 @@ import CandleChart from "../candle.jsx";
 import { fmtPrice, isUS, marketOpen, Pct, pct, useJson, usMarketOpen, won } from "../lib.jsx";
 import { OrderBook, OrderPanel } from "../order.jsx";
 import { usePaper } from "../paper.js";
-import { liveStop, useMode } from "../strategy.jsx";
+import { teamPositions, useMode } from "../strategy.jsx";
 import { Flash, StockAvatar } from "../ui.jsx";
 import { toggleWatch, useWatch } from "../watch.js";
 import { loadCreds, saveCreds } from "./Account.jsx";
@@ -52,16 +52,16 @@ function useAccountPosition(code) {
   return state.code === code ? state : { connected: false, position: null };
 }
 
-// 평단가: 계좌 연결 시 한투 잔고, 없으면 가상 모의투자 보유, 그것도 없으면 팀 공격형 보유 기록의 매수가.
-// 손절선은 팀 공격형 규칙에만 있음
+// 평단가: 계좌 연결 시 한투 잔고, 없으면 가상 모의투자 보유, 그것도 없으면 팀 보유 기록의 매수가.
+// 손절선은 팀 보유 기록에만 있음 (매일 종가로 갱신, data/strategy/positions.json)
 function holdingOf(d, acct, mode, paperPos) {
   if (!d) return null;
-  const aggr = mode?.mode === "aggressive" && mode.state?.position?.code === d.code ? mode.state.position : null;
+  const aggr = teamPositions(mode?.state).find((p) => p.code === d.code) || null;
   const base = (acct.position && { avg: acct.position.avgPrice, shares: acct.position.shares, src: "계좌" })
     || (paperPos && { avg: paperPos.avg, shares: paperPos.shares, src: "모의" })
     || (!acct.connected && aggr && { avg: aggr.entry, shares: aggr.shares, src: "팀" });
   if (!base || !base.avg) return null;
-  const s = base.src === "팀" && liveStop(aggr, mode.state.rules, d.price);
+  const s = base.src === "팀" && aggr.stop ? { stop: aggr.stop, why: aggr.stop_reason } : null;
   return {
     ...base,
     price: d.price,

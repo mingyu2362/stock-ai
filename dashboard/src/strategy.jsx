@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Pct, StockLink, won } from "./lib.jsx";
 
 // 투자 성향 (안정형 / 공격형). 저장소의 data/strategy/*.json 을 /api/mode 로 읽고 바꾼다
+// 두 성향 모두 전략 "AI 추세" (trade/strategy.py), 종목 수만 다르다
 const LABEL = { stable: "안정형", aggressive: "공격형" };
+const RULE = "종가가 20일선·60일선 위에 있는 오르는 종목 중 AI 점수 순으로 사요. 손절선(처음 매수가 − ATR×2, 그 뒤 종가 고점 − ATR×3)에 닿으면 장중에 바로, 종가가 20일선 아래면 다음 날 아침에 팔아요. 코스피가 60일선 아래면 새로 사지 않아요.";
 const DESC = {
-  stable: "AI 1~3위를 1/3씩 보유하고, 보유 종목이 12위 밖으로 밀리면 다음 날 아침에 팔아요.",
-  aggressive: "1종목에 전액. 순위와 상관없이 손절선 아래로 내려가면 장중에 바로 팔고, 다음 날 아침 AI 1위를 사요.",
+  stable: `6종목에 1/6씩. ${RULE}`,
+  aggressive: `3종목에 1/3씩 (안정형보다 집중). ${RULE}`,
 };
 
 export function useMode() {
@@ -24,15 +26,6 @@ export function useMode() {
     return () => { alive = false; };
   }, [tick]);
   return { ...state, reload: useCallback(() => setTick((t) => t + 1), []) };
-}
-
-// 매매 프로그램(trade/aggressive.py)과 같은 계산: 지금 가격까지 넣은 고점으로 손절선을 다시 센다
-export function liveStop(pos, rules, price) {
-  const peak = Math.max(pos.peak, price || 0);
-  if (peak >= pos.entry * (1 + rules.breakeven_at)) {
-    return { stop: peak * (1 - rules.trail), peak, why: `추적 익절 (고점 -${rules.trail * 100}%)` };
-  }
-  return { stop: pos.entry * (1 - rules.stop_loss), peak, why: `손절 (매수가 -${rules.stop_loss * 100}%)` };
 }
 
 function SwitchForm({ target, onDone, onCancel }) {
@@ -69,21 +62,38 @@ function SwitchForm({ target, onDone, onCancel }) {
   );
 }
 
-function AggressiveDetail({ s, positions }) {
-  const pos = s?.position;
-  if (!pos) {
-    const x = s?.last_exit;
-    return (
-      <p className="sub" style={{ margin: "12px 0 0" }}>
-        공격형 보유 종목이 없어요. 다음 거래일 아침에 AI 1위를 전액 매수해요.
-        {x && <> 최근 정리: {x.date} {x.time} {x.name} {won(x.shares)}주 @ {won(x.price)}원
-          (매수가 {won(x.entry)}원, <Pct v={(x.price / x.entry - 1) * 100} digits={2} />, {x.reason})</>}
-      </p>
-    );
-  }
+// 팀 보유 기록 (data/strategy/positions.json)
+export const teamPositions = (s) => s?.positions || [];
+
+function PositionsDetail({ s, positions }) {
+  const list = teamPositions(s);
+  const exits = (s?.exits || []).slice(-3).reverse();
+  const market = s?.market;
+  return (
+    <>
+      {market && (
+        <p className="sub" style={{ margin: "10px 0 0" }}>
+          시장 필터 ({market.date}): 코스피 {won(market.kospi)} {market.ok ? "≥" : "<"} 60일선 {won(market.kospi_ma)} →{" "}
+          <b className={market.ok ? "up" : "down"}>{market.ok ? "새로 살 수 있어요" : "새로 사지 않아요 (현금 보유)"}</b>
+        </p>
+      )}
+      {list.length === 0 && (
+        <p className="sub" style={{ margin: "10px 0 0" }}>팀 보유 종목이 없어요.{market && !market.ok ? " 코스피가 60일선 위로 올라오면 다시 사요." : " 다음 거래일 아침에 조건에 맞는 종목을 사요."}</p>
+      )}
+      {list.map((pos) => <Position key={pos.code} pos={pos} positions={positions} />)}
+      {exits.length > 0 && (
+        <p className="sub" style={{ margin: "10px 0 0" }}>
+          최근 정리: {exits.map((x, k) => (
+            <span key={k}>{k ? " · " : ""}{x.date} {x.name} {x.price ? <>{x.estimated ? "약 " : ""}{won(x.price)}원 (<Pct v={(x.price / x.entry - 1) * 100} digits={1} />)</> : ""} {x.reason}</span>
+          ))}
+        </p>
+      )}
+    </>
+  );
+}
+
+function Position({ pos, positions }) {
   const price = positions?.find((p) => p.code === pos.code)?.price;
-  const { stop, peak, why } = liveStop(pos, s.rules, price);
-  const trailing = peak >= pos.entry * (1 + s.rules.breakeven_at);
   return (
     <dl className="info-grid" style={{ marginTop: 12 }}>
       <div><dt>종목</dt><dd><StockLink code={pos.code} name={pos.name} /></dd></div>
@@ -92,16 +102,12 @@ function AggressiveDetail({ s, positions }) {
         <dt>현재가</dt>
         <dd className="num">{price ? <>{won(price)}원 <Pct v={(price / pos.entry - 1) * 100} digits={2} /></> : "계좌 연결 시 표시"}</dd>
       </div>
-      <div><dt>고점</dt><dd className="num">{won(peak)}원</dd></div>
+      <div><dt>종가 고점 · ATR</dt><dd className="num">{won(pos.peak)}원 · {won(pos.atr)}</dd></div>
       <div>
-        <dt>손절선 · {why}</dt>
+        <dt>손절선 · {pos.stop_reason}</dt>
         <dd className="num down">
-          {won(stop)}원{price ? <span className="muted"> (현재가 대비 {((stop / price - 1) * 100).toFixed(1)}%)</span> : null}
+          {won(pos.stop)}원{price ? <span className="muted"> (현재가 대비 {((pos.stop / price - 1) * 100).toFixed(1)}%)</span> : null}
         </dd>
-      </div>
-      <div>
-        <dt>추적 익절 시작</dt>
-        <dd className="num">{trailing ? "적용 중" : `${won(pos.entry * (1 + s.rules.breakeven_at))}원 (+${s.rules.breakeven_at * 100}%)`}</dd>
       </div>
     </dl>
   );
@@ -124,14 +130,14 @@ export default function StrategyCard({ m, positions }) {
       {m.error && !m.data && <p className="error-text">투자 성향을 불러오지 못했어요: {String(m.error.message)}</p>}
       {mode && (
         <p className="sub" style={{ margin: 0 }}>
-          {DESC[mode]} 바꾸면 다음 매매부터 적용돼요 (장중 감시는 5분 안에, 아침 매매는 다음 거래일부터).
+          {DESC[mode]} 바꾸면 다음 거래일 아침부터 종목 수가 바뀌어요 (가진 종목은 억지로 팔지 않아요).
           {m.data.changedAt && <span className="muted"> · {m.data.changedAt.slice(0, 16).replace("T", " ")} 변경</span>}
         </p>
       )}
       {target && target !== mode && (
         <SwitchForm target={target} onCancel={() => setTarget(null)} onDone={() => { setTarget(null); m.reload(); }} />
       )}
-      {mode === "aggressive" && <AggressiveDetail s={m.data.state} positions={positions} />}
+      {mode && <PositionsDetail s={m.data.state} positions={positions} />}
     </div>
   );
 }

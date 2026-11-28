@@ -31,7 +31,7 @@ export default function Research() {
 function StrategyCompare() {
   const state = useJson("backtest.json");
   const [market, setMarket] = useState("kr");
-  const [picked, setPicked] = useState(["stable", "aggressive"]);
+  const [picked, setPicked] = useState(["trend_stable", "stable"]);
   return (
     <Loading state={state}>
       {(all) => {
@@ -39,8 +39,10 @@ function StrategyCompare() {
         if (!st) return <div className="card empty">전략 비교 데이터가 아직 없어요 (python dashboard/export.py --backtest).</div>;
         const d = st[market];
         if (!d) return <div className="card empty">{market === "us" ? "나스닥100" : "국내"} 전략 비교 데이터가 없어요.</div>;
+        const has = new Set(d.rows.map((r) => r.key));
+        const shown = picked.filter((k) => has.has(k));
         const series = [
-          ...picked.map((k) => ({ key: k, name: st.defs[k].label })),
+          ...(shown.length ? shown : [d.rows[0].key]).map((k) => ({ key: k, name: st.defs[k].label })),
           { key: "index", name: d.index_name, short: market === "us" ? "나스닥100" : "코스피" },
         ];
         const toggle = (k) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p.slice(-1), k]));
@@ -114,7 +116,10 @@ function StrategyCompare() {
             <div className="card">
               <h2>읽을 때 주의할 점</h2>
               <ul className="findings">
-                <li><b>공격형은 운에 크게 흔들려요.</b> 1종목만 들고 있어서 손절·익절 값을 조금만 바꿔도 결과가 완전히 달라져요 (아래 민감도 표). 한 번의 좋은 결과를 실력으로 보면 안 돼요.</li>
+                <li><b>2026-11-28에 전략을 "AI 추세"로 새로 짰어요 (안정형·공격형 공통, 종목 수만 6 / 3).</b> 목표는 코스피 대비 안정적인 초과수익과 낙폭 제한이에요. 후보 6개(눌림목·과매도 반등·추세·모멘텀·저변동)를 2025-01~2026-06에서만 미리 정한 기준으로 비교해 고르고, 2026-07~11(코스피 −45%)에서 한 번 확인했어요: 안정형 −11% (MDD −15%), 공격형 −16% (MDD −17%). 손실을 줄인 건 대부분 "코스피 60일선 아래면 새로 사지 않기" 덕분이고, 하락장에서 돈을 번 건 아니에요. 자세한 표: data/predictions/lab_*.csv (model/strategy_lab.py).</li>
+                <li><b>처음부터 이어서 돌리면 AI 추세 안정형의 MDD는 −39%예요.</b> 2026-06~07 고점 부근에서 코스피가 ±10%씩 출렁일 때(60일선보다는 위라 필터가 안 켜짐) 사고 손절당하기를 반복해 −33%가 났어요. 위 표는 2026-10-27까지라 11월 급락이 빠져 이전 안정형이 더 좋아 보이지만, 2026-11-25까지 이으면 AI 추세 +169% · 이전 안정형 +157% · 코스피 +96%예요. 기간을 어디서 자르느냐에 따라 순서가 바뀔 만큼 차이가 크지 않다는 뜻이에요.</li>
+                <li><b>이전 전략은 비교용이에요.</b> 이전 안정형(대회)은 2026-07 이후 −38%로 하락장 방어가 거의 없었고, 이전 공격형은 손절·익절 값을 조금만 바꿔도 결과가 완전히 달라졌어요.</li>
+                <li><b>AI 모델은 단기 낙폭 과대 반등을 노려요.</b> 최근 5일 많이 빠진 종목일수록 점수가 높아서, 하락장에서는 급락주를 상위에 올려요 (2026년 11월 실전 순위 1위 종목 평균 −1.9%/일).</li>
                 <li><b>모멘텀(AI 없음)이 높게 나온 기간은 생존 편향을 의심하세요.</b> 지금 지수에 남아 있는 종목만으로 과거를 돌리면 많이 오른 종목을 미리 아는 셈이라 추세 추종이 특히 유리해져요.</li>
                 <li><b>나스닥100 모델은 신호가 약해요.</b> 월별 검증 순위상관(IC)이 2025년 +0.03, 2026년 0 근처라 국내 모델(차트+시장)보다 확실히 약해요. 참고용으로만 보세요.</li>
                 <li>모두 일봉으로 흉내 낸 결과예요. 장중 손절은 손절가에서 0.2% 불리하게 체결한다고 가정했어요.</li>
@@ -134,8 +139,8 @@ function AggrGrid({ rows, periods }) {
   const cell = (s, t) => rows.find((r) => r.stop === s && r.trail === t);
   return (
     <div className="card section">
-      <h2>공격형 민감도: 손절 x 추적 익절 폭 (전체 기간 수익률)</h2>
-      <p className="sub">추적 익절은 고점이 매수가 +10%에 닿은 뒤부터. 실전 값은 손절 12%, 폭 8%예요. 칸에 마우스를 올리면 기간별 수익률이 보여요.</p>
+      <h2>이전 공격형 민감도: 손절 x 추적 익절 폭 (전체 기간 수익률)</h2>
+      <p className="sub">이전 공격형 규칙(2종목, 20위 밖 매도, 칼날 제외)에서 손절·추적 폭만 바꾼 결과예요 (지금은 쓰지 않는 전략, 값에 따라 결과가 크게 흔들렸던 근거). 추적 익절은 고점이 매수가 +10%에 닿은 뒤부터. 11/26 값은 손절 8%, 폭 8% (테두리). 칸에 마우스를 올리면 기간별 수익률이 보여요.</p>
       <div className="table-wrap">
         <table>
           <thead><tr><th className="l">손절 \ 추적 폭</th>{trails.map((t) => <th key={t}>{Math.round(t * 100)}%</th>)}</tr></thead>
@@ -145,7 +150,7 @@ function AggrGrid({ rows, periods }) {
                 <td className="l">−{Math.round(s * 100)}%</td>
                 {trails.map((t) => {
                   const c = cell(s, t);
-                  const live = Math.abs(s - 0.12) < 1e-9 && Math.abs(t - 0.08) < 1e-9;
+                  const live = Math.abs(s - 0.08) < 1e-9 && Math.abs(t - 0.08) < 1e-9;
                   return (
                     <td key={t} title={periods.map((p) => `${p}: ${c?.[p]?.toFixed(1)}%`).join("\n") + `\nMDD ${c?.mdd?.toFixed(1)}%`}
                       style={live ? { fontWeight: 700, outline: "2px solid var(--accent)", outlineOffset: -2 } : undefined}>
